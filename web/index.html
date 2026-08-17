@@ -76,7 +76,7 @@
 const API = window.API_BASE || "http://localhost:8080";
 const MAPS_KEY = "YOUR_MAPS_API_KEY";
 const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add"};
-let map, infoWindow, markers = [], view = "mirrors", cache = {};
+let map, infoWindow, geocoder, infoToken = 0, markers = [], view = "mirrors", cache = {};
 
 function initMap(){
   map = new google.maps.Map(document.getElementById("map"), {
@@ -97,16 +97,32 @@ function photoUrl(it){
 
 function openInfo(it, marker){
   if(view !== "mirrors" && view !== "review") return;
+  const token = ++infoToken;   // 非同步反查地址回來時，用這個確認彈窗還是同一個點
   const photo = photoUrl(it);
   const label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
+  const coords = `${it.lat.toFixed(6)}, ${it.lng.toFixed(6)}`;
+  const mapsLink = `https://www.google.com/maps?q=${it.lat},${it.lng}`;
   const html = `<div style="max-width:220px;font-family:system-ui,'Noto Sans TC',sans-serif">
     ${photo ? `<img src="${photo}" style="width:100%;border-radius:6px;display:block;margin-bottom:6px" onerror="this.remove()">` : ""}
     <div style="font-weight:600;font-size:13px">${label}</div>
     <div style="font-size:12px;color:#6f6d64;margin-top:4px;line-height:1.4">${it.reason ?? ""}</div>
+    <div id="geo-addr" style="font-size:11px;color:#9b978a;margin-top:8px">查詢地址中…</div>
+    <div style="font-size:11px;color:#6f6d64;margin-top:2px">${coords}</div>
+    <a href="${mapsLink}" target="_blank" rel="noopener"
+       style="display:inline-block;margin-top:4px;font-size:11px;color:#378add">在 Google 地圖開啟 ↗</a>
   </div>`;
   infoWindow.setContent(html);
   if(marker) infoWindow.open({map, anchor: marker});
   else { infoWindow.setPosition({lat: it.lat, lng: it.lng}); infoWindow.open(map); }
+
+  geocoder = geocoder || new google.maps.Geocoder();
+  geocoder.geocode({location: {lat: it.lat, lng: it.lng}}, (results, status)=>{
+    if(token !== infoToken) return;   // 使用者已經切到別的點，這個結果過期了
+    const el = document.getElementById("geo-addr");
+    if(!el) return;
+    if(status === "OK" && results[0]) el.textContent = results[0].formatted_address;
+    else el.remove();
+  });
 }
 
 function clearMarkers(){ markers.forEach(m=>m.setMap(null)); markers = []; }
