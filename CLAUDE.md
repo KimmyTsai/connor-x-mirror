@@ -212,9 +212,14 @@ Windows / PowerShell。環境變數用 `$env:` 語法，不是 `export`：
 
 ```powershell
 $env:GOOGLE_CLOUD_PROJECT = "..."
-$env:GOOGLE_CLOUD_LOCATION = "asia-east1"
+$env:GOOGLE_CLOUD_LOCATION = "us-central1"
 $env:MAPS_API_KEY = "..."
 ```
+
+**`GOOGLE_CLOUD_LOCATION` 不要用 `asia-east1`**：實測 `gemini-2.5-flash` 在這個
+region 對這個專案回 404（`Publisher model ... was not found`），`us-central1`
+可用。這是 Vertex AI 呼叫用的 region，跟 `schema.sql` 裡 BigQuery 資料集的
+`location = "asia-east1"` 是兩件事，BigQuery 那個不用動。
 
 專案應放在 `C:\dev\mirror-eye`，**避開 OneDrive 與中文路徑**。
 

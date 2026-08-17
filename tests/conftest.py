@@ -14,6 +14,8 @@ from pathlib import Path
 os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "test-project")
 os.environ.setdefault("MAPS_API_KEY", "test-key")
 
-PIPELINE_DIR = Path(__file__).resolve().parent.parent / "pipeline"
-if str(PIPELINE_DIR) not in sys.path:
-    sys.path.insert(0, str(PIPELINE_DIR))
+ROOT = Path(__file__).resolve().parent.parent
+for sub in ("pipeline", "api"):
+    p = str(ROOT / sub)
+    if p not in sys.path:
+        sys.path.insert(0, p)

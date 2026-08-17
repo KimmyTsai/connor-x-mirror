@@ -26,7 +26,7 @@ from google.genai import types
 from google.cloud import bigquery
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
-LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "asia-east1")
+LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 app = FastAPI(title="鏡眼 Mirror Eye API")
 app.add_middleware(

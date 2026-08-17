@@ -9,7 +9,7 @@
 
 環境變數：
   GOOGLE_CLOUD_PROJECT   GCP 專案 ID
-  GOOGLE_CLOUD_LOCATION  例 asia-east1
+  GOOGLE_CLOUD_LOCATION  例 us-central1（asia-east1 目前沒有 gemini-2.5-flash）
   MAPS_API_KEY           Maps Platform 金鑰（需啟用 Street View Static + Metadata）
 """
 
@@ -26,7 +26,7 @@ from google.genai import types
 from google.cloud import bigquery
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
-LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "asia-east1")
+LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 MAPS_KEY = os.environ["MAPS_API_KEY"]
 MODEL = "gemini-2.5-flash"
 MODEL_VERSION = f"{MODEL}/rubric-v1"

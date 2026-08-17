@@ -53,7 +53,8 @@ mirror-eye/
 
 ```bash
 export PROJECT=your-project-id
-export REGION=asia-east1
+export REGION=asia-east1            # Cloud Run 部署位置，離台灣使用者近
+export GEMINI_LOCATION=us-central1  # Vertex AI 呼叫用；asia-east1 目前沒有 gemini-2.5-flash（實測 404）
 export MAPS_API_KEY=your-maps-key
 gcloud config set project $PROJECT
 ```
@@ -94,7 +95,7 @@ bq query --use_legacy_sql=false < schema.sql
 
 ```bash
 pip install -r requirements.txt
-export GOOGLE_CLOUD_PROJECT=$PROJECT GOOGLE_CLOUD_LOCATION=$REGION
+export GOOGLE_CLOUD_PROJECT=$PROJECT GOOGLE_CLOUD_LOCATION=$GEMINI_LOCATION
 python pipeline/inspection.py 22.9997 120.2270
 ```
 
@@ -104,7 +105,7 @@ python pipeline/inspection.py 22.9997 120.2270
 cd api
 gcloud run deploy mirror-eye-api \
   --source . --region $REGION --allow-unauthenticated \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$REGION
+  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$GEMINI_LOCATION
 ```
 
 ### 6. 部署前端
