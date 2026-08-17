@@ -38,10 +38,15 @@ priority_score = condition_score × (0.5 + risk_score / 100)
 
 ```
 mirror-eye/
-├── schema.sql            BigQuery 資料表與評分視圖
-├── pipeline/inspection.py 街景取樣 + Gemini 判讀
-├── api/main.py           Cloud Run API
-├── web/index.html        地圖前端
+├── schema.sql              BigQuery 資料表與評分視圖
+├── pipeline/
+│   ├── detect.py           Stage 1：街景廣角掃描找出鏡子座標 → 寫入 mirrors
+│   ├── inspection.py       Stage 2：變焦特寫 + Gemini 判讀 → 寫入 inspections
+│   ├── link.py             把 mirrors 逐一送進 Stage 2 判讀
+│   └── validate.py         precision / recall 驗證
+├── api/main.py             Cloud Run API
+├── web/index.html          地圖前端
+├── tests/                  純函式單元測試（不需要 GCP 憑證）
 └── README.md
 ```
 
@@ -49,68 +54,131 @@ mirror-eye/
 
 ## 建置步驟
 
-### 0. 環境變數
+以下先講「本機跑起來看網站」（開發、demo 用，最快），
+最後才是正式部署到 Cloud Run／Firebase 的版本。兩條路徑共用步驟 0-3。
 
-```bash
-export PROJECT=your-project-id
-export REGION=asia-east1            # Cloud Run 部署位置，離台灣使用者近
-export GEMINI_LOCATION=us-central1  # Vertex AI 呼叫用；asia-east1 目前沒有 gemini-2.5-flash（實測 404）
-export MAPS_API_KEY=your-maps-key
-gcloud config set project $PROJECT
+### 0. 前提
+
+- Python 3.10+，`pip install -r requirements.txt`（跑測試另外要 `pip install -r requirements-dev.txt`）
+- 一個已啟用帳單、Vertex AI／BigQuery／Maps Platform 的 GCP 專案
+- `gcloud auth login` 且 `gcloud auth application-default login`
+  （Vertex AI 用 ADC，不是 API 金鑰；沒設定的話 `genai.Client(vertexai=True,...)` 會連不上）
+- 一把 Maps API 金鑰，需啟用：Street View Static API、Street View Metadata API、
+  Maps JavaScript API（前端地圖用）
+
+### 1. 環境變數
+
+**PowerShell（Windows，本專案主要開發環境）：**
+
+```powershell
+$env:GOOGLE_CLOUD_PROJECT = "your-project-id"
+$env:GOOGLE_CLOUD_LOCATION = "us-central1"   # 不要用 asia-east1，這個 region 沒有 gemini-2.5-flash（實測 404）
+$env:MAPS_API_KEY = "your-maps-key"
+gcloud config set project $env:GOOGLE_CLOUD_PROJECT
 ```
 
-### 1. 啟用 API
+**bash / macOS / Linux：**
+
+```bash
+export GOOGLE_CLOUD_PROJECT=your-project-id
+export GOOGLE_CLOUD_LOCATION=us-central1
+export MAPS_API_KEY=your-maps-key
+gcloud config set project $GOOGLE_CLOUD_PROJECT
+```
+
+之後每個新開的終端機視窗都要重設一次這三個變數
+（PowerShell 關掉視窗不會保留 `$env:`）。
+
+### 2. 啟用 API、建立資料表
 
 ```bash
 gcloud services enable \
   aiplatform.googleapis.com \
   bigquery.googleapis.com \
   run.googleapis.com \
-  storage.googleapis.com \
-  firestore.googleapis.com \
   maps-backend.googleapis.com \
   street-view-image-backend.googleapis.com
+
+# 注意 --location，跟 GOOGLE_CLOUD_LOCATION 是兩件事：
+# 這裡是 BigQuery 資料集位置（schema.sql 裡寫死 asia-east1），
+# 不指定的話 bq 預設用 US，執行 schema.sql 會直接報錯
+bq --location=asia-east1 query --use_legacy_sql=false < schema.sql
 ```
 
-Maps Platform 金鑰需啟用：
-Street View Static API、Street View Metadata API、Maps JavaScript API、Geocoding API
+### 3. 灌資料：偵測範圍內的反射鏡
 
-### 2. 建立資料表
+沒有現成的反射鏡開放資料時（多數縣市目前查不到），用 `detect.py` 掃街景自動建清冊——
+這是這個專案的核心賣點，不是退而求其次的作法。
 
 ```bash
-bq query --use_legacy_sql=false < schema.sql
+cd pipeline   # 一定要在 pipeline/ 目錄內執行，validate.py/link.py 用相對 import 抓 detect.py
+
+# 準備一份 csv：id,lat,lng（路口座標，可以自己列，或用 OSM Overpass API 抓某行政區界內的真實路口）
+python detect.py intersections.csv     # Stage 1：找出鏡子概略座標，寫進 BigQuery mirrors 表
+python link.py --only-new              # Stage 2：對每支新鏡子做變焦判讀，寫進 inspections 表
 ```
 
-### 3. 灌入基礎資料
+`detect.py` 一個路口要打 8 次 Gemini（8 方位掃描），路口一多很容易撞到 Vertex AI
+的速率限制（429 RESOURCE_EXHAUSTED）；撞到就等個一兩分鐘再從卡住的路口繼續，
+不用整批重跑。
 
-- **路口節點**：政府路網或 OSM 匯出，載入 `intersections`
-- **事故資料**：道安資訊查詢網開放資料，載入 `accidents`
-- **反射鏡點位**：縣市開放資料平台搜「反射鏡 / 凸面鏡 / 照後鏡」，載入 `mirrors`
-
-> 若查無反射鏡開放資料，改由 `inspection.py` 掃街景自動偵測，
-> `mirrors.source` 填 `streetview_detected` ──
-> 這條路的故事更好：等於替城市建立第一份不存在的清冊。
-
-### 4. 跑判讀管線
+只想測單一座標的判讀，不想跑完整偵測流程：
 
 ```bash
-pip install -r requirements.txt
-export GOOGLE_CLOUD_PROJECT=$PROJECT GOOGLE_CLOUD_LOCATION=$GEMINI_LOCATION
-python pipeline/inspection.py 22.9997 120.2270
+python inspection.py 22.9997 120.2270
 ```
 
-### 5. 部署 API
+### 4a. 本機跑起來看網站（推薦先做這步）
+
+**啟動 API：**
+
+```bash
+cd api
+python -m uvicorn main:app --host 127.0.0.1 --port 8080
+```
+
+看到 `Uvicorn running on http://127.0.0.1:8080` 就是啟動成功，這個終端機視窗要保持開著。
+另開一個視窗確認：瀏覽器開 `http://127.0.0.1:8080/api/mirrors`，應該要看到 JSON。
+
+**開網站：**
+
+`web/index.html` 裡的 `YOUR_MAPS_API_KEY` 是刻意留著的佔位字串——
+**金鑰不進版控**，這條規矩是這個專案吃過一次真實教訓換來的
+（第一版曾經把帳號密碼跟金鑰明碼寫進 `pw.txt` 一起 commit 上 GitHub）。
+所以本機測試時複製一份出去改，不要直接改 repo 裡的檔案：
+
+```bash
+cp web/index.html /tmp/index_test.html      # 或隨便一個 repo 外的路徑
+# 把 /tmp/index_test.html 裡兩處 YOUR_MAPS_API_KEY 換成你自己的金鑰
+```
+
+換好金鑰後開網頁，兩種方式都可以：
+
+- 直接用瀏覽器打開那個檔案（`file:///tmp/index_test.html`）
+- 或在檔案所在目錄跑 `python -m http.server 8081`，開 `http://127.0.0.1:8081/index_test.html`
+
+網頁預設會打 `http://localhost:8080` 抓資料（跟上面 API 啟動的 port 要一致）；
+要指到別的位置，在 `<script>` 區塊前加一行
+`<script>window.API_BASE = "http://your-host:port";</script>`。
+
+打開後應該看到地圖跟三個分頁：**維護優先序**（已確認的鏡子）、
+**待複查**（Stage 2 沒能重新確認、需要人工看照片判斷的點位）、**設置需求**
+（沒有鏡子的路口缺口分析，需要先灌 `intersections`/`accidents` 資料才有內容）。
+
+### 4b. 正式部署（Cloud Run + Firebase Hosting）
+
+本機測試沒問題後才做這步。
 
 ```bash
 cd api
 gcloud run deploy mirror-eye-api \
-  --source . --region $REGION --allow-unauthenticated \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$GEMINI_LOCATION
+  --source . --region asia-east1 --allow-unauthenticated \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_CLOUD_PROJECT,GOOGLE_CLOUD_LOCATION=$GOOGLE_CLOUD_LOCATION
 ```
 
-### 6. 部署前端
-
-把 `web/index.html` 裡的 `YOUR_MAPS_API_KEY` 換掉，並設定 API base：
+`web/index.html` 一樣先複製一份換掉 `YOUR_MAPS_API_KEY`（部署上去的網站是公開網址，
+Maps JavaScript API 金鑰本來就是前端可見的東西，但金鑰仍然不該進 git 歷史，
+部署時用 CI 變數注入或部署腳本替換），並在 `<script>` 標籤前加：
 
 ```html
 <script>window.API_BASE = "https://mirror-eye-api-xxxx.run.app";</script>
@@ -120,6 +188,17 @@ gcloud run deploy mirror-eye-api \
 firebase init hosting   # public 目錄設為 web
 firebase deploy --only hosting
 ```
+
+### 疑難排解
+
+| 現象 | 原因 |
+|---|---|
+| `bq query` 報 `Location ... is not consistent` | 沒加 `--location=asia-east1` |
+| Gemini 呼叫回 404 `Publisher model ... was not found` | `GOOGLE_CLOUD_LOCATION` 設成 `asia-east1` 了，這個 region 沒有 `gemini-2.5-flash` |
+| `import detect` / `import inspection` 相關錯誤 | 沒有在 `pipeline/` 目錄內執行 |
+| `ImportError: cannot import name 'dataclass' ...`（或其他標準庫模組匯入錯誤） | 曾經發生過 `pipeline/inspect.py` 跟標準庫 `inspect` 模組同名的問題，現已改名 `inspection.py`；如果又看到類似錯誤，檢查是不是哪支腳本檔名撞到標準庫模組 |
+| `429 RESOURCE_EXHAUSTED` | Vertex AI 速率限制，等 1-2 分鐘再繼續，不用整批重跑 |
+| 網站地圖是空的、但 API 直接 curl 有資料 | 通常是 `YOUR_MAPS_API_KEY` 還沒換掉，或換的那份檔案跟你打開的不是同一份 |
 
 ---
 
