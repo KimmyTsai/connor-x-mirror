@@ -145,7 +145,8 @@ mirror-eye/
 ├── schema.sql              BigQuery 表與評分視圖
 ├── pipeline/
 │   ├── detect.py           街景偵測鏡子 → 寫入 mirrors
-│   ├── inspect.py          鏡況判讀 → 寫入 inspections
+│   ├── inspection.py       鏡況判讀 → 寫入 inspections
+│   ├── link.py             把 mirrors 逐一送進 inspect_point()
 │   └── validate.py         precision / recall 驗證
 ├── api/main.py             Cloud Run API
 └── web/index.html          地圖前端
@@ -223,9 +224,9 @@ $env:MAPS_API_KEY = "..."
 
 ## 待辦
 
-- [ ] `pipeline/link.py`：把 `mirrors` 表的鏡子逐一送進 `inspect_point()`
+- [x] `pipeline/link.py`：把 `mirrors` 表的鏡子逐一送進 `inspect_point()`
 - [ ] 驗證 Gemini `box_2d` 的座標順序是否為 `[ymin, xmin, ymax, xmax]`
 - [ ] 以實地量測校準 `ASSUMED_DIST_M`
 - [ ] 成本對照表填入實際造價數字
-- [ ] Stage 2 變焦特寫接進 `inspect.py`
+- [ ] Stage 2 變焦特寫接進 `inspection.py`
 - [ ] 選配：偵測結果輸出成 OSM 格式回饋開放社群

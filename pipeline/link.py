@@ -19,7 +19,7 @@ import argparse
 
 from google.cloud import bigquery
 
-from inspect import inspect_point
+from inspection import inspect_point
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 

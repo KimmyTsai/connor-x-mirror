@@ -39,7 +39,7 @@ priority_score = condition_score × (0.5 + risk_score / 100)
 ```
 mirror-eye/
 ├── schema.sql            BigQuery 資料表與評分視圖
-├── pipeline/inspect.py   街景取樣 + Gemini 判讀
+├── pipeline/inspection.py 街景取樣 + Gemini 判讀
 ├── api/main.py           Cloud Run API
 ├── web/index.html        地圖前端
 └── README.md
@@ -86,7 +86,7 @@ bq query --use_legacy_sql=false < schema.sql
 - **事故資料**：道安資訊查詢網開放資料，載入 `accidents`
 - **反射鏡點位**：縣市開放資料平台搜「反射鏡 / 凸面鏡 / 照後鏡」，載入 `mirrors`
 
-> 若查無反射鏡開放資料，改由 `inspect.py` 掃街景自動偵測，
+> 若查無反射鏡開放資料，改由 `inspection.py` 掃街景自動偵測，
 > `mirrors.source` 填 `streetview_detected` ──
 > 這條路的故事更好：等於替城市建立第一份不存在的清冊。
 
@@ -95,7 +95,7 @@ bq query --use_legacy_sql=false < schema.sql
 ```bash
 pip install -r requirements.txt
 export GOOGLE_CLOUD_PROJECT=$PROJECT GOOGLE_CLOUD_LOCATION=$REGION
-python pipeline/inspect.py 22.9997 120.2270
+python pipeline/inspection.py 22.9997 120.2270
 ```
 
 ### 5. 部署 API
@@ -126,7 +126,7 @@ firebase deploy --only hosting
 
 **Street View Static API 計費，Metadata API 免費。**
 
-`inspect.py` 一律先呼叫 Metadata 確認該座標有無街景、拍攝年月，
+`inspection.py` 一律先呼叫 Metadata 確認該座標有無街景、拍攝年月，
 通過才抓圖。否則會在半夜燒掉額度，抓回一堆空白圖。
 
 每個路口取四方位（heading 0/90/180/270），`fov` 設 60~80 較接近人眼。
@@ -135,7 +135,7 @@ firebase deploy --only hosting
 
 ## 判讀 rubric
 
-五個維度各 0~3 分，權重見 `pipeline/inspect.py` 的 `WEIGHTS`：
+五個維度各 0~3 分，權重見 `pipeline/inspection.py` 的 `WEIGHTS`：
 
 | 維度 | 權重 | 說明 |
 |---|---|---|
