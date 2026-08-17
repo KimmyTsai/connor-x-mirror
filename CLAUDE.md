@@ -48,6 +48,23 @@ priority_score = condition_score × (0.5 + risk_score / 100)
 所有分數都要能拆解回分項貢獻（`s_accident` / `s_sight` / `s_width` / `s_vulnerable`），
 前端也要畫成貢獻條。**可解釋性優先於準確率。**
 
+**「沒資料」不能跟「量出來是 0 分」用同一種畫法**：`s_sight`（轉角視距）、
+`s_width`（道路寬度）目前沒有 GIS 資料源，`intersections.sight_distance_m` /
+`road_width_m` 永遠是 NULL，`CASE WHEN NULL THEN 0` 讓這兩項恆為 0 分——
+如果前端只看分數畫貢獻條，會讓「沒量過」長得跟「量出來很安全」一樣，這正是
+可解釋性原則要擋的那種誤導。`v_intersection_risk`／`v_installation_need` 因此
+額外把 `sight_distance_m`／`road_width_m` 原始值（可能是 NULL）一起吐出來，
+前端看到 NULL 要畫成「無資料」而不是空的分數條。
+
+**已經查證過、故意沒做的兩個補強方向**：
+- 想用 CSV「肇因碼-個別」比對 PDF 對照表的 117（因光線、視線遮蔽致生事故）
+  當作 `s_sight` 的代理指標——查過雙和里這 81 筆事故，符合的只有 1 筆，
+  訊號太稀薄，做出來是雜訊不是訊號，不做。
+- 想用 OSM 路段的 `lanes` 標記估 `road_width_m`——39 條路段只有 4 條有標記，
+  覆蓋率太低，不做。
+- 這兩項要有意義的分數，還是得靠實地量測（呼應 `ASSUMED_DIST_M` 那條待辦），
+  不是靠更聰明的資料湊出來的。
+
 ### 4. 去重是必做的
 
 同一支鏡子會被多個全景點、多個方位角重複看到。

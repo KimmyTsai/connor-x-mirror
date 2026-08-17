@@ -124,6 +124,11 @@ SELECT
   acc.accident_count,
   -- 分項貢獻：前端要能拆開顯示，這是可解釋性的來源
   LEAST(acc.accident_weight * 2.0, 40)                              AS s_accident,
+  -- sight_distance_m／road_width_m 原始值也要一起帶出去：
+  -- 前端不能只看 s_sight/s_width 的分數，NULL（沒量過）跟量出來的 0 分
+  -- 意義完全不同，混在一起會讓「沒資料」看起來像「安全」
+  i.sight_distance_m,
+  i.road_width_m,
   CASE WHEN i.sight_distance_m IS NULL THEN 0
        WHEN i.sight_distance_m < 10 THEN 25
        WHEN i.sight_distance_m < 20 THEN 15
@@ -162,6 +167,7 @@ SELECT
   r.district,
   r.road_names,
   r.accident_count,
+  r.sight_distance_m, r.road_width_m,
   r.s_accident, r.s_sight, r.s_width, r.s_vulnerable, r.s_signal_offset,
   r.base_score,
   IFNULL(rep.report_count, 0) AS report_count,   -- 併列顯示，不加進分數
