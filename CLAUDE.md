@@ -85,6 +85,13 @@ Stage 2 直接解決鏡面在廣角圖中只有數十像素的解析度瓶頸。
 
 `ASSUMED_DIST_M` 應以實地量測校準 —— 這是簡報的加分點。
 
+**`box_2d = [ymin, xmin, ymax, xmax]` 順序已實測驗證**：把真實偵測到的
+`box_2d` 用兩種順序畫回原圖比對，`[ymin, xmin, ymax, xmax]`（目前
+`detect.py` 的假設）明顯壓在真實鏡子上，順序對調的版本完全落空。
+驗證過程中另外發現一個不同的問題：偶爾框的座標順序沒錯、但框本身
+定位不準（例如框到樹叢而非畫面裡真正的鏡子），這是 bounding box
+精準度問題，跟座標順序無關，尚未處理。
+
 ### 9. 判讀 rubric 的權重理由
 
 | 維度 | 權重 | 理由 |
@@ -230,7 +237,7 @@ region 對這個專案回 404（`Publisher model ... was not found`），`us-cen
 ## 待辦
 
 - [x] `pipeline/link.py`：把 `mirrors` 表的鏡子逐一送進 `inspect_point()`
-- [ ] 驗證 Gemini `box_2d` 的座標順序是否為 `[ymin, xmin, ymax, xmax]`
+- [x] 驗證 Gemini `box_2d` 的座標順序是否為 `[ymin, xmin, ymax, xmax]`
 - [ ] 以實地量測校準 `ASSUMED_DIST_M`
 - [ ] 成本對照表填入實際造價數字
 - [x] Stage 2 變焦特寫接進 `inspection.py`
