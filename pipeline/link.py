@@ -66,15 +66,14 @@ def run(limit: int | None = None, only_new: bool = False) -> None:
             continue
 
         inspected += 1
-        present = [r for r in results if r.mirror_present]
-        if present:
-            worst = max(present, key=lambda r: r.condition_score)
+        r = results[0]
+        if r.mirror_present:
             print(f"[{i}/{len(mirrors)}] {m['mirror_id']}  "
-                  f"最差劣化 {worst.condition_score} (信心 {worst.confidence:.2f})")
+                  f"劣化 {r.condition_score} (信心 {r.confidence:.2f})")
         else:
-            # 四方位都判不出鏡子：可能是定位偏移、街景過舊，或鏡子已被拆除
+            # Stage 2 特寫都判不出鏡子：可能是定位偏移、街景過舊，或鏡子已被拆除
             print(f"[{i}/{len(mirrors)}] {m['mirror_id']}  "
-                  f"四方位皆未見鏡子 ⚠ 建議人工複查")
+                  f"未見鏡子 ⚠ 建議人工複查：{r.reason}")
 
     print(f"\n完成：{inspected} 支已判讀，{skipped} 支無街景略過")
 

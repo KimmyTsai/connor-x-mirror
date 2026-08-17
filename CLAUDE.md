@@ -233,5 +233,5 @@ region 對這個專案回 404（`Publisher model ... was not found`），`us-cen
 - [ ] 驗證 Gemini `box_2d` 的座標順序是否為 `[ymin, xmin, ymax, xmax]`
 - [ ] 以實地量測校準 `ASSUMED_DIST_M`
 - [ ] 成本對照表填入實際造價數字
-- [ ] Stage 2 變焦特寫接進 `inspection.py`
+- [x] Stage 2 變焦特寫接進 `inspection.py`
 - [ ] 選配：偵測結果輸出成 OSM 格式回饋開放社群

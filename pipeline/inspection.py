@@ -1,9 +1,12 @@
 """
-鏡眼 Mirror Eye ── 街景取樣與鏡況判讀管線
+鏡眼 Mirror Eye ── 街景取樣與鏡況判讀管線（Stage 2 變焦特寫）
 
 流程：
-  1. Street View Metadata API 確認該點有無街景（免費，先擋掉無效請求）
-  2. Street View Static API 取四方位影像
+  1. Street View Metadata API 確認該點有無街景（免費，先擋掉無效請求），
+     取得離目標座標最近的全景點位置
+  2. 由全景點指向目標座標算出精確方位角（bearing_between），
+     用 fov=20 窄角特寫 —— Stage 1（detect.py）的廣角掃描負責「找出方位」，
+     這裡負責「鎖定該方位」，解決鏡面在廣角圖裡只有數十像素的解析度瓶頸
   3. Gemini on Vertex AI 做結構化判讀
   4. 寫入 BigQuery inspections
 
@@ -24,6 +27,8 @@ import requests
 from google import genai
 from google.genai import types
 from google.cloud import bigquery
+
+from detect import bearing_between, ZOOM_FOV, PITCH
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -207,32 +212,35 @@ def write(rows: list[Inspection]) -> None:
 
 def inspect_point(lat: float, lng: float, *,
                   mirror_id: str | None = None,
-                  intersection_id: str | None = None,
-                  headings: tuple[int, ...] = (0, 90, 180, 270)) -> list[Inspection]:
-    """對單一座標取四方位街景並判讀。回傳所有判讀結果。"""
+                  intersection_id: str | None = None) -> list[Inspection]:
+    """對單一座標做 Stage 2 變焦判讀：找最近全景點、算出精確指向該座標的
+    方位角、用 fov=20 窄角特寫給 Gemini 判讀。回傳單一判讀結果的 list
+    （street view 無覆蓋時回傳空 list），維持跟舊版一樣的回傳型別。
+    """
     meta = streetview_metadata(lat, lng)
     if meta is None:
         print(f"[skip] no street view at {lat},{lng}")
         return []
 
+    plat, plng = meta["location"]["lat"], meta["location"]["lng"]
+    bearing = bearing_between((plat, plng), (lat, lng))
     captured_at = meta.get("date")   # 形如 2023-07
-    results: list[Inspection] = []
 
-    for h in headings:
-        img = streetview_image(lat, lng, h)
-        verdict = judge(img)
-        uri = f"{SV_IMG}?location={lat},{lng}&heading={h}"
-        results.append(build_inspection(
-            verdict,
-            image_uri=uri,
-            image_source="streetview",
-            mirror_id=mirror_id,
-            intersection_id=intersection_id,
-            captured_at=f"{captured_at}-01T00:00:00Z" if captured_at else None,
-        ))
+    img = streetview_image(plat, plng, round(bearing), fov=ZOOM_FOV, pitch=PITCH)
+    verdict = judge(img)
+    uri = (f"{SV_IMG}?location={plat},{plng}"
+           f"&heading={round(bearing)}&fov={ZOOM_FOV}&pitch={PITCH}")
+    result = build_inspection(
+        verdict,
+        image_uri=uri,
+        image_source="streetview",
+        mirror_id=mirror_id,
+        intersection_id=intersection_id,
+        captured_at=f"{captured_at}-01T00:00:00Z" if captured_at else None,
+    )
 
-    write(results)
-    return results
+    write([result])
+    return [result]
 
 
 if __name__ == "__main__":
@@ -240,5 +248,6 @@ if __name__ == "__main__":
     lat, lng = float(sys.argv[1]), float(sys.argv[2])
     for r in inspect_point(lat, lng):
         if r.mirror_present:
-            print(f"heading -> 劣化 {r.condition_score} "
-                  f"(信心 {r.confidence:.2f})  {r.reason}")
+            print(f"劣化 {r.condition_score} (信心 {r.confidence:.2f})  {r.reason}")
+        else:
+            print(f"未偵測到鏡子：{r.reason}")

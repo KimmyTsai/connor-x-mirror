@@ -146,6 +146,16 @@ def haversine(a: tuple[float, float], b: tuple[float, float]) -> float:
     return 2 * EARTH_R * math.asin(math.sqrt(h))
 
 
+def bearing_between(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """由 a 指向 b 的初始方位角（大圓航法）。destination() 的反運算，
+    供 Stage 2 變焦特寫用：已知全景點與鏡子座標，算出該把鏡頭轉去哪。"""
+    lat1, lat2 = math.radians(a[0]), math.radians(b[0])
+    dlng = math.radians(b[1] - a[1])
+    x = math.sin(dlng) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlng)
+    return math.degrees(math.atan2(x, y)) % 360.0
+
+
 # ── Street View ─────────────────────────────────────────
 def has_streetview(lat: float, lng: float) -> dict | None:
     """Metadata API 免費，務必先擋掉沒有街景的座標。"""

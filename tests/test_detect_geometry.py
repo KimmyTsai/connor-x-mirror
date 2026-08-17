@@ -9,7 +9,7 @@ import math
 
 import pytest
 
-from detect import destination, haversine, EARTH_R
+from detect import destination, haversine, bearing_between, EARTH_R
 
 
 def test_haversine_same_point_is_zero():
@@ -57,3 +57,32 @@ def test_destination_zero_distance_is_noop():
     dest = destination(*origin, 137.0, 0.0)
     assert dest[0] == pytest.approx(origin[0], abs=1e-12)
     assert dest[1] == pytest.approx(origin[1], abs=1e-12)
+
+
+# ── bearing_between()：Stage 2 變焦特寫用來瞄準鏡子的方位角計算 ──
+
+def test_bearing_between_is_inverse_of_destination():
+    origin = (22.9997, 120.2270)
+    for bearing in (0, 45, 90, 135, 180, 225, 270, 315):
+        dest = destination(*origin, bearing, 8.0)
+        got = bearing_between(origin, dest)
+        # 0 度／360 度是同一個方位，浮點數在邊界上會落在任一側，取模比較
+        diff = min(abs(got - bearing), 360 - abs(got - bearing))
+        assert diff == pytest.approx(0.0, abs=1e-4)
+
+
+def test_bearing_between_north_is_zero():
+    a = (22.9997, 120.2270)
+    b = (22.9998, 120.2270)  # 正北方
+    assert bearing_between(a, b) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_bearing_between_east_is_90():
+    a = (22.9997, 120.2270)
+    b = (22.9997, 120.2280)  # 正東方
+    assert bearing_between(a, b) == pytest.approx(90.0, abs=1e-3)
+
+
+def test_bearing_between_same_point_is_zero():
+    p = (22.9997, 120.2270)
+    assert bearing_between(p, p) == 0.0
