@@ -7,3 +7,4 @@ __pycache__/
 pw.txt
 *.env
 .env
+.claude/
