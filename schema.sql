@@ -1,4 +1,4 @@
--- Connor.X 城市反射鏡數據網 ── BigQuery schema
+-- Corner.X 城市反射鏡數據網 ── BigQuery schema
 -- 執行：bq query --use_legacy_sql=false < schema.sql
 
 CREATE SCHEMA IF NOT EXISTS mirror_eye

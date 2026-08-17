@@ -1,5 +1,5 @@
 """
-Connor.X 城市反射鏡數據網 ── 把 mirrors 表的鏡子逐一送進鏡況判讀
+Corner.X 城市反射鏡數據網 ── 把 mirrors 表的鏡子逐一送進鏡況判讀
 
 流程：
   查詢 mirrors（status = active）→ 逐支呼叫 inspect_point() → 寫入 inspections

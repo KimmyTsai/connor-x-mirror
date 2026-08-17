@@ -1,5 +1,5 @@
 """
-Connor.X 城市反射鏡數據網 ── 偵測準確率驗證
+Corner.X 城市反射鏡數據網 ── 偵測準確率驗證
 
 用途：對人工標註的路口清單跑偵測，算出 precision / recall。
 簡報上「precision 0.9x / recall 0.8x，在 N 個路口的人工標註集上」這一行，

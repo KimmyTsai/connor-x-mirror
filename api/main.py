@@ -1,5 +1,5 @@
 """
-Connor.X 城市反射鏡數據網 ── Cloud Run API
+Corner.X 城市反射鏡數據網 ── Cloud Run API
 
 端點：
   GET  /api/mirrors          維護優先序（已有鏡子的點位）
@@ -39,7 +39,7 @@ PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 PHOTO_BUCKET = os.environ.get("PHOTO_BUCKET", f"{PROJECT}-mirror-photos")
 
-app = FastAPI(title="Connor.X 城市反射鏡數據網 API")
+app = FastAPI(title="Corner.X 城市反射鏡數據網 API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )

@@ -1,5 +1,5 @@
 """
-Connor.X 城市反射鏡數據網 ── 街景取樣與鏡況判讀管線（Stage 2 變焦特寫）
+Corner.X 城市反射鏡數據網 ── 街景取樣與鏡況判讀管線（Stage 2 變焦特寫）
 
 流程：
   1. Street View Metadata API 確認該點有無街景（免費，先擋掉無效請求），

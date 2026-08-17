@@ -1,4 +1,4 @@
-# Connor.X 城市反射鏡數據網｜實作方式與 24 小時作戰手冊
+# Corner.X 城市反射鏡數據網｜實作方式與 24 小時作戰手冊
 
 **2026 DevJam TW ── Google Cloud 賽道**
 
