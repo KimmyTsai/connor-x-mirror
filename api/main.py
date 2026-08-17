@@ -50,7 +50,7 @@ def list_mirrors(limit: int = 500):
     rows = q(f"""
         SELECT mirror_id, intersection_id,
                ST_Y(geom) AS lat, ST_X(geom) AS lng,
-               mirror_present, condition_score, risk_score, priority_score,
+               mirror_present, image_uri, condition_score, risk_score, priority_score,
                condition_level, confidence, reason, needs_human_review
         FROM `{PROJECT}.mirror_eye.v_maintenance_priority`
         ORDER BY priority_score DESC

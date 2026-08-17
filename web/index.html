@@ -73,15 +73,39 @@
 
 <script>
 const API = window.API_BASE || "http://localhost:8080";
+const MAPS_KEY = "YOUR_MAPS_API_KEY";
 const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add"};
-let map, markers = [], view = "mirrors", cache = {};
+let map, infoWindow, markers = [], view = "mirrors", cache = {};
 
 function initMap(){
   map = new google.maps.Map(document.getElementById("map"), {
     center:{lat:25.0250, lng:121.5635}, zoom:16, mapId:"DEMO_MAP_ID",
     disableDefaultUI:true, zoomControl:true
   });
+  infoWindow = new google.maps.InfoWindow();
   load();
+}
+
+// image_uri 存進 BigQuery 時故意不帶金鑰，這裡渲染時才附加，避免金鑰進資料庫；
+// size 也在這裡補上，涵蓋修 bug 之前寫入、沒有 size 參數的舊資料
+function photoUrl(it){
+  if(!it.image_uri) return null;
+  const sep = it.image_uri.includes("size=") ? "" : "&size=640x640";
+  return `${it.image_uri}${sep}&key=${MAPS_KEY}`;
+}
+
+function openInfo(it, marker){
+  if(view !== "mirrors") return;
+  const photo = photoUrl(it);
+  const label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
+  const html = `<div style="max-width:220px;font-family:system-ui,'Noto Sans TC',sans-serif">
+    ${photo ? `<img src="${photo}" style="width:100%;border-radius:6px;display:block;margin-bottom:6px" onerror="this.remove()">` : ""}
+    <div style="font-weight:600;font-size:13px">${label}</div>
+    <div style="font-size:12px;color:#6f6d64;margin-top:4px;line-height:1.4">${it.reason ?? ""}</div>
+  </div>`;
+  infoWindow.setContent(html);
+  if(marker) infoWindow.open({map, anchor: marker});
+  else { infoWindow.setPosition({lat: it.lat, lng: it.lng}); infoWindow.open(map); }
 }
 
 function clearMarkers(){ markers.forEach(m=>m.setMap(null)); markers = []; }
@@ -103,9 +127,10 @@ function render(items){
     const m = new google.maps.Marker({
       map, position: pos,
       icon:{ path: google.maps.SymbolPath.CIRCLE, scale: 7,
-             fillColor: color, fillOpacity: .9, strokeColor:"#fff", strokeWeight: 1.5 }
+             fillColor: color, fillOpacity: it.mirror_present === false ? .5 : .9,
+             strokeColor:"#fff", strokeWeight: 1.5 }
     });
-    m.addListener("click", ()=> focus(it));
+    m.addListener("click", ()=>{ focus(it); openInfo(it, m); });
     markers.push(m);
     bounds.extend(pos);
   });
@@ -173,7 +198,11 @@ function bar(label, v, max){
     <span>${v}</span></div>`;
 }
 
-function focusIdx(i){ focus(cache[view][i]); }
+function focusIdx(i){
+  const it = cache[view][i];
+  focus(it);
+  openInfo(it, markers[i]);
+}
 function focus(it){ map.panTo({lat:it.lat,lng:it.lng}); map.setZoom(19); }
 
 document.querySelectorAll(".tab").forEach(t=>{

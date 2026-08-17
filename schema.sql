@@ -208,6 +208,7 @@ SELECT
   m.intersection_id,
   m.geom,
   l.mirror_present,
+  l.image_uri,
   l.condition_score,
   l.confidence,
   l.reason,

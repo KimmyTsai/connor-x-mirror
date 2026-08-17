@@ -228,7 +228,8 @@ def inspect_point(lat: float, lng: float, *,
 
     img = streetview_image(plat, plng, round(bearing), fov=ZOOM_FOV, pitch=PITCH)
     verdict = judge(img)
-    uri = (f"{SV_IMG}?location={plat},{plng}"
+    # 注意：故意不帶 key —— 存進 BigQuery 的 URI 不留金鑰，前端渲染時才附加
+    uri = (f"{SV_IMG}?location={plat},{plng}&size=640x640"
            f"&heading={round(bearing)}&fov={ZOOM_FOV}&pitch={PITCH}")
     result = build_inspection(
         verdict,
