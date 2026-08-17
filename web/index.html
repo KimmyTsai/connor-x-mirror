@@ -96,16 +96,22 @@ function photoUrl(it){
 }
 
 function openInfo(it, marker){
-  if(view !== "mirrors" && view !== "review") return;
   const token = ++infoToken;   // 非同步反查地址回來時，用這個確認彈窗還是同一個點
   const photo = photoUrl(it);
-  const label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
+  let label, detail;
+  if(view === "gaps"){
+    label = `${(it.road_names||[]).join(" × ") || it.intersection_id}　${it.need_level} ${it.base_score}`;
+    detail = `近三年 ${it.accident_count} 件事故　民眾回報 ${it.report_count} 次`;
+  } else {
+    label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
+    detail = it.reason ?? "";
+  }
   const coords = `${it.lat.toFixed(6)}, ${it.lng.toFixed(6)}`;
   const mapsLink = `https://www.google.com/maps?q=${it.lat},${it.lng}`;
   const html = `<div style="max-width:220px;font-family:system-ui,'Noto Sans TC',sans-serif">
     ${photo ? `<img src="${photo}" style="width:100%;border-radius:6px;display:block;margin-bottom:6px" onerror="this.remove()">` : ""}
     <div style="font-weight:600;font-size:13px">${label}</div>
-    <div style="font-size:12px;color:#6f6d64;margin-top:4px;line-height:1.4">${it.reason ?? ""}</div>
+    <div style="font-size:12px;color:#6f6d64;margin-top:4px;line-height:1.4">${detail}</div>
     <div id="geo-addr" style="font-size:11px;color:#9b978a;margin-top:8px">查詢地址中…</div>
     <div style="font-size:11px;color:#6f6d64;margin-top:2px">${coords}</div>
     <a href="${mapsLink}" target="_blank" rel="noopener"
