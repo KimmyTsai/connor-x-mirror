@@ -46,13 +46,21 @@ def q(sql: str, params: list | None = None) -> list[dict]:
 # 地圖圖層
 # ---------------------------------------------------------------
 @app.get("/api/mirrors")
-def list_mirrors(limit: int = 500):
+def list_mirrors(limit: int = 500, status: str = "confirmed"):
+    """status=confirmed（預設，已確認的鏡子，維護優先序地圖用）
+    ／unconfirmed（Stage 2 未能重新確認，待人工複查，不是鏡子清冊）／all"""
+    where = {
+        "confirmed": "WHERE mirror_present",
+        "unconfirmed": "WHERE NOT mirror_present",
+        "all": "",
+    }.get(status, "WHERE mirror_present")
     rows = q(f"""
         SELECT mirror_id, intersection_id,
                ST_Y(geom) AS lat, ST_X(geom) AS lng,
                mirror_present, image_uri, condition_score, risk_score, priority_score,
                condition_level, confidence, reason, needs_human_review
         FROM `{PROJECT}.mirror_eye.v_maintenance_priority`
+        {where}
         ORDER BY priority_score DESC
         LIMIT @limit
     """, [bigquery.ScalarQueryParameter("limit", "INT64", limit)])
