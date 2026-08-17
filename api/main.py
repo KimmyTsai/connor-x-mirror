@@ -86,6 +86,7 @@ def list_gaps(limit: int = 200):
                ST_Y(geom) AS lat, ST_X(geom) AS lng,
                accident_count, base_score, need_level,
                report_count, flag_review,
+               sight_distance_m, road_width_m,
                s_accident, s_sight, s_width, s_vulnerable
         FROM `{PROJECT}.mirror_eye.v_installation_need`
         WHERE base_score > 0

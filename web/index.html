@@ -260,8 +260,8 @@ function renderList(items){
       </div>
       <div class="bars">
         ${bar("事故紀錄", it.s_accident, 40)}
-        ${bar("轉角視距", it.s_sight, 25)}
-        ${bar("道路寬度", it.s_width, 10)}
+        ${bar("轉角視距", it.s_sight, 25, it.sight_distance_m != null)}
+        ${bar("道路寬度", it.s_width, 10, it.road_width_m != null)}
         ${bar("弱勢用路", it.s_vulnerable, 25)}
       </div>
       <div class="why">近三年 ${it.accident_count} 件事故　民眾回報 ${it.report_count} 次</div>
@@ -270,7 +270,15 @@ function renderList(items){
   }).join("");
 }
 
-function bar(label, v, max){
+// hasData=false 代表這個維度根本沒有量測資料（例如轉角視距、道路寬度目前
+// 沒有 GIS 資料源）——跟「量出來是 0 分／安全」是兩件事，不能用同一條空白
+// 長條圖表示，那樣會讓「沒資料」看起來像「這裡沒問題」
+function bar(label, v, max, hasData = true){
+  if(!hasData){
+    return `<div class="bar"><span>${label}</span>
+      <span class="track" style="background:repeating-linear-gradient(45deg,var(--line),var(--line) 4px,var(--panel) 4px,var(--panel) 8px)"></span>
+      <span style="color:var(--muted)">無資料</span></div>`;
+  }
   const pct = Math.round((v/max)*100);
   return `<div class="bar"><span>${label}</span>
     <span class="track"><span class="fill" style="width:${pct}%"></span></span>
