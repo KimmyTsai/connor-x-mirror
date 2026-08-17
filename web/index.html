@@ -8,7 +8,7 @@
   :root{
     --bg:#f7f6f3; --panel:#fff; --line:#e3e1da;
     --text:#26251f; --muted:#6f6d64;
-    --healthy:#639922; --warn:#ef9f27; --fail:#e24b4a; --gap:#378add;
+    --healthy:#639922; --warn:#ef9f27; --fail:#e24b4a; --gap:#378add; --unknown:#9b978a;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,"Noto Sans TC",sans-serif;color:var(--text);background:var(--bg)}
@@ -31,6 +31,7 @@
   .pill{font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;white-space:nowrap}
   .p-fail{background:var(--fail)} .p-warn{background:var(--warn)}
   .p-ok{background:var(--healthy)} .p-gap{background:var(--gap)}
+  .p-unknown{background:var(--unknown)}
   .item .why{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
   .bars{margin-top:8px;display:grid;gap:4px}
   .bar{display:grid;grid-template-columns:64px 1fr 28px;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
@@ -64,6 +65,7 @@
       <div><span class="dot" style="background:var(--healthy)"></span>健康</div>
       <div><span class="dot" style="background:var(--warn)"></span>需保養</div>
       <div><span class="dot" style="background:var(--fail)"></span>失效</div>
+      <div><span class="dot" style="background:var(--unknown)"></span>位置待確認</div>
       <div><span class="dot" style="background:var(--gap)"></span>建議新設</div>
     </div>
   </div>
@@ -71,12 +73,12 @@
 
 <script>
 const API = window.API_BASE || "http://localhost:8080";
-const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","gap":"#378add"};
+const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add"};
 let map, markers = [], view = "mirrors", cache = {};
 
 function initMap(){
   map = new google.maps.Map(document.getElementById("map"), {
-    center:{lat:22.9997, lng:120.2270}, zoom:15, mapId:"DEMO_MAP_ID",
+    center:{lat:25.0250, lng:121.5635}, zoom:16, mapId:"DEMO_MAP_ID",
     disableDefaultUI:true, zoomControl:true
   });
   load();
@@ -119,7 +121,8 @@ function renderStats(items){
     el.innerHTML = `
       <div class="stat"><b>${items.length}</b><span>已納管</span></div>
       <div class="stat"><b style="color:var(--fail)">${c("失效")}</b><span>失效</span></div>
-      <div class="stat"><b style="color:var(--warn)">${c("需保養")}</b><span>需保養</span></div>`;
+      <div class="stat"><b style="color:var(--warn)">${c("需保養")}</b><span>需保養</span></div>
+      <div class="stat"><b style="color:var(--unknown)">${c("位置待確認")}</b><span>待確認</span></div>`;
   }else{
     const c = l => items.filter(i=>i.need_level===l).length;
     el.innerHTML = `
@@ -133,13 +136,15 @@ function renderList(items){
   const el = document.getElementById("list");
   el.innerHTML = items.slice(0,60).map((it,i)=>{
     if(view === "mirrors"){
-      const cls = {"失效":"p-fail","需保養":"p-warn","健康":"p-ok"}[it.condition_level];
+      const cls = {"失效":"p-fail","需保養":"p-warn","健康":"p-ok","位置待確認":"p-unknown"}[it.condition_level];
+      const label = it.mirror_present === false ? "位置待確認" : `優先序 ${it.priority_score}`;
       return `<div class="item" onclick="focusIdx(${i})">
         <div class="top">
           <span class="name">${it.mirror_id.slice(0,8)}</span>
-          <span class="pill ${cls}">優先序 ${it.priority_score}</span>
+          <span class="pill ${cls}">${label}</span>
         </div>
         <div class="why">${it.reason ?? ""}</div>
+        ${it.mirror_present === false ? '<div class="review">Stage 2 特寫未能在登記座標重新確認鏡子，非「健康」判定</div>' : ""}
         ${it.needs_human_review ? '<div class="review">信心不足，已排入人工複查</div>' : ""}
       </div>`;
     }

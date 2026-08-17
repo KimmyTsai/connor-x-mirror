@@ -184,7 +184,10 @@ WHERE NOT EXISTS (
 -- 維護優先序 = 鏡況劣化 × 該點位風險
 CREATE OR REPLACE VIEW mirror_eye.v_maintenance_priority AS
 WITH latest AS (
-  SELECT * EXCEPT(rn) FROM (
+  -- intersection_id 排除掉：mirrors.intersection_id 才是權威 FK，
+  -- inspections 裡的只是寫入當下的快照，兩者併入同一張表會讓下面的
+  -- USING (intersection_id) 對到哪一欄產生歧義
+  SELECT * EXCEPT(rn, intersection_id) FROM (
     SELECT i.*, ROW_NUMBER() OVER (
       PARTITION BY mirror_id ORDER BY created_at DESC
     ) AS rn
@@ -204,16 +207,19 @@ SELECT
   m.mirror_id,
   m.intersection_id,
   m.geom,
+  l.mirror_present,
   l.condition_score,
   l.confidence,
   l.reason,
   l.dirt_score, l.angle_score, l.damage_score,
   l.occlusion_score, l.corrosion_score,
   IFNULL(risk.risk_score, 30) AS risk_score,
-  -- 核心公式
+  -- 核心公式；mirror_present=false 時 condition_score 固定是 0，
+  -- 但那不是「健康」，是 Stage 2 沒能在登記座標重新確認鏡子
   ROUND(l.condition_score * (0.5 + IFNULL(risk.risk_score, 30) / 100.0), 1)
     AS priority_score,
   CASE
+    WHEN NOT l.mirror_present THEN '位置待確認'
     WHEN l.condition_score >= 60 THEN '失效'
     WHEN l.condition_score >= 30 THEN '需保養'
     ELSE '健康'
