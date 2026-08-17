@@ -1,4 +1,4 @@
-# 鏡眼 Mirror Eye ── 反射鏡安裝與維護系統
+# Connor.X 城市反射鏡數據網 ── 反射鏡安裝與維護系統
 
 DevJam TW 2026｜Google Cloud 賽道
 
@@ -37,7 +37,7 @@ priority_score = condition_score × (0.5 + risk_score / 100)
 ## 目錄結構
 
 ```
-mirror-eye/
+connor-x-mirror/
 ├── schema.sql              BigQuery 資料表與評分視圖
 ├── pipeline/
 │   ├── detect.py           Stage 1：街景廣角掃描找出鏡子座標 → 寫入 mirrors
