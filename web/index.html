@@ -85,7 +85,10 @@
 </div>
 
 <script>
-const API = window.API_BASE || "http://localhost:8080";
+// 預設同源（空字串 → 相對路徑），因為正式部署時這個頁面跟 API
+// 是同一個 Cloud Run 服務。本機分開測試（api 在 8080、網頁另開 port）
+// 才需要用 window.API_BASE 明確指到 http://localhost:8080。
+const API = window.API_BASE ?? "";
 const MAPS_KEY = "YOUR_MAPS_API_KEY";
 const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add","pending":"#9456c4"};
 let map, infoWindow, geocoder, infoToken = 0, markers = [], view = "mirrors", cache = {};

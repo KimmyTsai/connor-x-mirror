@@ -74,7 +74,8 @@
 </div>
 
 <script>
-const API = window.API_BASE || "http://localhost:8080";
+// 同上：預設同源，本機分開測試才需要 window.API_BASE 指到 localhost:8080
+const API = window.API_BASE ?? "";
 const MAPS_KEY = "YOUR_MAPS_API_KEY";
 
 let map, marker, chosenPos = null;

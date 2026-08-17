@@ -12,9 +12,14 @@ Corner.X 城市反射鏡數據網 ── Cloud Run API
   POST /api/reports          民眾回報（文字陳情），Gemini 抽取結構化事實
   POST /api/reports/{id}/letter  生成陳情書內容
 
-部署：
+部署（從 repo 根目錄跑，不是 api/ 目錄——這樣才能同時抓到根目錄的
+requirements.txt、Procfile，和 web/ 底下要一起服務的靜態網頁）：
   gcloud run deploy mirror-eye-api --source . --region asia-east1 \
     --allow-unauthenticated --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT
+
+靜態網頁（web/index.html、web/report.html）直接掛在這個 FastAPI app 上
+一起出去，不是另外部署到 Firebase Hosting——同一個 Cloud Run 服務、
+同一個網址，服務對照表上的 Firebase Hosting 是原本規劃但沒採用的方案。
 
 注意：/api/pending 的審核端點目前沒有身分驗證（跟這個專案其他端點一樣，
 Cloud Run 是 --allow-unauthenticated）。正式上線前要補管理者登入，
@@ -25,10 +30,12 @@ import os
 import json
 import uuid
 import datetime as dt
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
@@ -449,3 +456,12 @@ def generate_letter(report_id: str):
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+
+# ---------------------------------------------------------------
+# 靜態網頁 —— 一定要放在所有 /api/* 路由後面，
+# 用 "/" 掛載會接住所有沒被前面路由匹配到的路徑，順序反過來會蓋掉 API
+# ---------------------------------------------------------------
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+if WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")

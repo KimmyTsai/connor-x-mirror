@@ -166,29 +166,31 @@ cp web/index.html /tmp/index_test.html      # 或隨便一個 repo 外的路徑
 **待複查**（Stage 2 沒能重新確認、需要人工看照片判斷的點位）、**設置需求**
 （沒有鏡子的路口缺口分析，需要先灌 `intersections`/`accidents` 資料才有內容）。
 
-### 4b. 正式部署（Cloud Run + Firebase Hosting）
+### 4b. 正式部署（單一 Cloud Run 服務，API ＋ 靜態網頁一起出）
 
-本機測試沒問題後才做這步。
+本機測試沒問題後才做這步。**實際採用的架構跟一開始規劃的不一樣**：
+原本想 API 走 Cloud Run、網頁走 Firebase Hosting 兩個服務，後來改成
+`api/main.py` 直接把 `web/` 掛成靜態檔案（見檔案最後的 `app.mount("/", StaticFiles(...))`），
+兩者合併成同一個 Cloud Run 服務、同一個網址——單人／小隊伍 24 小時內不用多維護一個
+Firebase 專案，`Procfile`＋根目錄的 `requirements.txt` 也才會被 buildpacks 正確抓到。
+
+**部署指令一定要在 repo 根目錄跑**（不是 `api/` 目錄），這樣才能同時包進
+`Procfile`、根目錄 `requirements.txt`，還有 `web/` 底下的靜態頁面：
 
 ```bash
-cd api
-gcloud run deploy mirror-eye-api \
+gcloud run deploy corner-x-mirror \
   --source . --region asia-east1 --allow-unauthenticated \
-  --set-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_CLOUD_PROJECT,GOOGLE_CLOUD_LOCATION=$GOOGLE_CLOUD_LOCATION
+  --set-env-vars GOOGLE_CLOUD_PROJECT=$GOOGLE_CLOUD_PROJECT,GOOGLE_CLOUD_LOCATION=$GOOGLE_CLOUD_LOCATION,PHOTO_BUCKET=$GOOGLE_CLOUD_PROJECT-mirror-photos
 ```
 
-`web/index.html` 一樣先複製一份換掉 `YOUR_MAPS_API_KEY`（部署上去的網站是公開網址，
-Maps JavaScript API 金鑰本來就是前端可見的東西，但金鑰仍然不該進 git 歷史，
-部署時用 CI 變數注入或部署腳本替換），並在 `<script>` 標籤前加：
+`web/index.html`／`web/report.html` 的 `YOUR_MAPS_API_KEY` 一樣要換成真金鑰——
+但**不要直接改 repo 裡的檔案**，複製一份到 repo 外面的暫存資料夾、在那份副本
+換金鑰，再用 `--source` 指到那個資料夾部署，部署完 repo 裡的檔案完全沒被動過。
+金鑰本身進到公開網站是必然的（Maps JavaScript API key 本來就是前端可見的東西），
+不該進 git 歷史的是「檔案裡寫死金鑰」這件事，不是「金鑰曾經在瀏覽器上出現過」。
 
-```html
-<script>window.API_BASE = "https://mirror-eye-api-xxxx.run.app";</script>
-```
-
-```bash
-firebase init hosting   # public 目錄設為 web
-firebase deploy --only hosting
-```
+部署完打開 Cloud Run 給的網址（`https://xxx-xxx.a.run.app`）就是完整網站，
+`/report.html` 是民眾回報頁，不用另外設定 `API_BASE`（同源，見下方疑難排解）。
 
 ### 疑難排解
 
@@ -201,6 +203,9 @@ firebase deploy --only hosting
 | `429 RESOURCE_EXHAUSTED` | Vertex AI 速率限制，等 1-2 分鐘再繼續，不用整批重跑 |
 | 網站地圖是空的、但 API 直接 curl 有資料 | 通常是 `YOUR_MAPS_API_KEY` 還沒換掉，或換的那份檔案跟你打開的不是同一份 |
 | 審核（`/api/pending/{id}/review`）回 500，錯誤訊息提到 `streaming buffer` | 那筆鏡子是幾秒／幾分鐘前剛插入的，BigQuery streaming insert 的資料最多 90 分鐘內不能 UPDATE/DELETE，等一下再試 |
+| `gcloud run deploy` 報 `PERMISSION_DENIED ... could not resolve source` | Cloud Build 用的預設 compute service account 沒有讀取上傳原始碼那個 `run-sources-*` bucket 的權限。專案層級 IAM（`gcloud projects add-iam-policy-binding`）在部分沙盒帳號會被擋，改在那個 bucket 上單獨授權：`gcloud storage buckets add-iam-policy-binding gs://run-sources-$PROJECT-$REGION --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/storage.objectViewer"` |
+| 部署後網站打得開，`/healthz` 卻回 Google 的通用 404 頁（不是 FastAPI 的） | 這個路徑會被 Cloud Run 前面的 Google 邊緣層擋掉，跟程式碼無關，也沒有任何地方依賴這個端點，可以忽略 |
+| 本機終端機印出來的中文變問號或亂碼 | 這台機器的 Bash 工具把 Python `print()` 的中文轉譯回來顯示這條路徑不可靠，**檔案跟 BigQuery 裡的資料通常是好的**。不要憑終端機顯示判斷資料有沒有壞，去讀原始檔案（例如 `Read` 工具、編輯器）或截圖瀏覽器畫面比對，那兩條路徑一路可靠 |
 
 ---
 
@@ -304,16 +309,17 @@ Stage 2 只取一張特寫：由最近全景點算出精確指向目標座標的
 | Vertex AI（Gemini 2.5 Flash / Pro） | 鏡況判讀、事實抽取、陳情書生成 |
 | BigQuery | 清冊、判讀歷史、事故整合 |
 | BigQuery GIS | `ST_DWithin` 空間關聯、視距計算 |
-| Cloud Run | 無伺服器 API |
-| Cloud Storage | 民眾上傳照片 |
+| Cloud Run | 無伺服器 API，同時把 `web/` 靜態網頁一起服務出去 |
+| Cloud Storage | 民眾上傳照片（bucket 不公開，經 API 代理讀取） |
 | Street View Static / Metadata API | 影像來源 |
 | Maps JavaScript API | 前端地圖圖層 |
-| Firebase Hosting | 網站託管 |
 
 **選型取捨（簡報要講）**：
 - 判讀用 Flash（量大、要便宜），陳情書生成用 Pro（品質優先）
 - 空間關聯交給 BigQuery GIS，不自己寫幾何運算
 - `temperature=0.1` ＋ `response_schema` 強制結構化輸出，確保評分可重現
+- 前端跟 API 合併進同一個 Cloud Run 服務，不另外用 Firebase Hosting——
+  黑客松時間有限，少維護一個部署目標
 
 ---
 
