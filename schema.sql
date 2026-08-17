@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS mirror_eye.mirrors (
   geom              GEOGRAPHY,
   source            STRING,          -- opendata | streetview_detected | citizen
   installed_year    INT64,
-  status            STRING,          -- active | removed
+  status            STRING,          -- active | removed | pending（民眾回報新鏡子，待管理者審核才轉 active）
   updated_at        TIMESTAMP
 );
 

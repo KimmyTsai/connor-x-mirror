@@ -5,12 +5,20 @@
   GET  /api/mirrors          維護優先序（已有鏡子的點位）
   GET  /api/gaps             設置需求排序（沒有鏡子的路口）
   GET  /api/mirrors/{id}     單一鏡子詳情，含分項貢獻
-  POST /api/reports          民眾回報，Gemini 抽取結構化事實
+  POST /api/mirror-photos    民眾上傳鏡子照片＋座標，Gemini 判讀後更新／新增鏡子
+  GET  /api/photo/{path}     代理讀取民眾上傳照片（bucket 不公開，一律經 API 讀）
+  GET  /api/pending          待審核的民眾新增鏡子（status=pending）
+  POST /api/pending/{id}/review  管理者審核（核准轉 active／退回轉 removed）
+  POST /api/reports          民眾回報（文字陳情），Gemini 抽取結構化事實
   POST /api/reports/{id}/letter  生成陳情書內容
 
 部署：
   gcloud run deploy mirror-eye-api --source . --region asia-east1 \
     --allow-unauthenticated --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT
+
+注意：/api/pending 的審核端點目前沒有身分驗證（跟這個專案其他端點一樣，
+Cloud Run 是 --allow-unauthenticated）。正式上線前要補管理者登入，
+不然任何人都能核准／退回鏡子。
 """
 
 import os
@@ -18,15 +26,18 @@ import json
 import uuid
 import datetime as dt
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
 from google.cloud import bigquery
+from google.cloud import storage
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+PHOTO_BUCKET = os.environ.get("PHOTO_BUCKET", f"{PROJECT}-mirror-photos")
 
 app = FastAPI(title="鏡眼 Mirror Eye API")
 app.add_middleware(
@@ -35,6 +46,7 @@ app.add_middleware(
 
 bq = bigquery.Client(project=PROJECT)
 genai_client = genai.Client(vertexai=True, project=PROJECT, location=LOCATION)
+storage_client = storage.Client(project=PROJECT)
 
 
 def q(sql: str, params: list | None = None) -> list[dict]:
@@ -101,6 +113,231 @@ def mirror_detail(mirror_id: str):
         {"label": "鏽蝕傾斜", "score": r["corrosion_score"], "max": 3, "weight": 0.10},
     ]
     return r
+
+
+# ---------------------------------------------------------------
+# 民眾上傳鏡子照片
+#
+# 判讀 rubric 跟 pipeline/inspection.py 是同一套，複製一份而不是 import，
+# 因為 Cloud Run 用 `--source .` 只會打包 api/ 目錄，抓不到 pipeline/。
+# 改動 rubric 時兩邊要一起改。
+# ---------------------------------------------------------------
+CITIZEN_RUBRIC = """
+你是道路設施稽核員，正在檢視一張民眾上傳的道路反射鏡（凸面鏡）照片，判斷鏡況。
+
+先判斷畫面中是否存在道路反射鏡。若不存在，mirror_present 設為 false，
+其餘評分欄位一律填 0，reason 說明畫面中看到什麼。
+
+若存在，針對以下五個維度各給 0 到 3 分（0 = 完好，3 = 嚴重）：
+
+dirt_score      鏡面髒污、積塵、霧化、水漬，導致成像模糊
+angle_score     鏡體角度偏移、下垂、扭轉，反射方向偏離原設計盲區
+damage_score    鏡面破裂、缺角、剝落、鏡體變形
+occlusion_score 植栽、招牌、電線、違停車輛遮蔽鏡面或阻擋駕駛視線
+corrosion_score 支架鏽蝕、螺絲鬆脫、桿體傾斜
+
+評分原則：
+- 只依畫面可見證據評分，不要臆測。
+- 民眾拍攝角度、光線可能不理想，若解析度不足以判斷某維度，該維度給 0，
+  並降低 confidence，在 reason 中說明受限原因。
+- confidence 為 0 到 1 的浮點數，代表你對整體判讀的把握程度。
+
+reason 請用繁體中文，兩句以內，具體描述看到的證據。
+"""
+
+CITIZEN_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "mirror_present": {"type": "BOOLEAN"},
+        "dirt_score": {"type": "INTEGER"},
+        "angle_score": {"type": "INTEGER"},
+        "damage_score": {"type": "INTEGER"},
+        "occlusion_score": {"type": "INTEGER"},
+        "corrosion_score": {"type": "INTEGER"},
+        "confidence": {"type": "NUMBER"},
+        "reason": {"type": "STRING"},
+    },
+    "required": [
+        "mirror_present", "dirt_score", "angle_score", "damage_score",
+        "occlusion_score", "corrosion_score", "confidence", "reason",
+    ],
+}
+
+CITIZEN_WEIGHTS = {
+    "dirt_score": 0.25, "angle_score": 0.30, "damage_score": 0.20,
+    "occlusion_score": 0.15, "corrosion_score": 0.10,
+}
+
+
+def judge_citizen_photo(image_bytes: bytes, mime: str) -> dict:
+    resp = genai_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[types.Part.from_bytes(data=image_bytes, mime_type=mime), CITIZEN_RUBRIC],
+        config=types.GenerateContentConfig(
+            temperature=0.1,
+            response_mime_type="application/json",
+            response_schema=CITIZEN_RESPONSE_SCHEMA,
+        ),
+    )
+    return json.loads(resp.text)
+
+
+def citizen_condition_score(v: dict) -> float:
+    raw = sum(v[k] * w for k, w in CITIZEN_WEIGHTS.items())
+    return round(raw / 3.0 * 100, 1)
+
+
+ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_PHOTO_BYTES = 8 * 1024 * 1024   # 8MB，手機拍照常見大小，擋掉異常大檔
+NEAR_MIRROR_RADIUS_M = 20            # 這個距離內視為同一支既有鏡子，不新增
+
+
+@app.post("/api/mirror-photos")
+async def submit_mirror_photo(
+    lat: float = Form(...),
+    lng: float = Form(...),
+    note: str = Form(""),
+    photo: UploadFile = File(...),
+):
+    content_type = photo.content_type or "image/jpeg"
+    if content_type not in ALLOWED_PHOTO_TYPES:
+        raise HTTPException(400, f"不支援的檔案類型：{content_type}")
+    content = await photo.read()
+    if len(content) > MAX_PHOTO_BYTES:
+        raise HTTPException(400, "照片太大，請壓縮到 8MB 以內")
+    if not content:
+        raise HTTPException(400, "空檔案")
+
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    blob_name = f"citizen/{uuid.uuid4()}.jpg"
+    bucket = storage_client.bucket(PHOTO_BUCKET)
+    bucket.blob(blob_name).upload_from_string(content, content_type=content_type)
+
+    # 找 20 公尺內既有的現役鏡子；找不到就當成新地點
+    near = q(f"""
+        SELECT mirror_id, intersection_id
+        FROM `{PROJECT}.mirror_eye.mirrors`
+        WHERE status = 'active'
+          AND ST_DWITHIN(geom, ST_GEOGPOINT(@lng, @lat), @radius)
+        LIMIT 1
+    """, [
+        bigquery.ScalarQueryParameter("lng", "FLOAT64", lng),
+        bigquery.ScalarQueryParameter("lat", "FLOAT64", lat),
+        bigquery.ScalarQueryParameter("radius", "FLOAT64", NEAR_MIRROR_RADIUS_M),
+    ])
+
+    is_new = not near
+    if is_new:
+        mirror_id = str(uuid.uuid4())
+        intersection_id = None
+        # 民眾回報的新鏡子先進 pending，管理者審核過才會出現在公開地圖上——
+        # 這比「更新既有鏡子狀況」更強的主張，直接公開容易被灌票或誤判位置污染清冊
+        #
+        # 用 DML INSERT 而不是 insert_rows_json（streaming insert）：
+        # streaming insert 寫入的資料最多 90 分鐘會卡在 buffer 裡不能 UPDATE，
+        # 但審核動作（/api/pending/{id}/review）馬上就要能改 status，兩者衝突。
+        q(f"""
+            INSERT INTO `{PROJECT}.mirror_eye.mirrors`
+              (mirror_id, intersection_id, geom, source, installed_year, status, updated_at)
+            VALUES
+              (@mirror_id, NULL, ST_GEOGPOINT(@lng, @lat), 'citizen', NULL, 'pending', CURRENT_TIMESTAMP())
+        """, [
+            bigquery.ScalarQueryParameter("mirror_id", "STRING", mirror_id),
+            bigquery.ScalarQueryParameter("lng", "FLOAT64", lng),
+            bigquery.ScalarQueryParameter("lat", "FLOAT64", lat),
+        ])
+    else:
+        mirror_id = near[0]["mirror_id"]
+        intersection_id = near[0]["intersection_id"]
+
+    verdict = judge_citizen_photo(content, content_type)
+    score = citizen_condition_score(verdict) if verdict["mirror_present"] else 0.0
+
+    inspection_row = {
+        "inspection_id": str(uuid.uuid4()),
+        "mirror_id": mirror_id,
+        "intersection_id": intersection_id,
+        "image_uri": f"/api/photo/{blob_name}",
+        "image_source": "citizen",
+        "captured_at": now,
+        "mirror_present": verdict["mirror_present"],
+        "dirt_score": verdict["dirt_score"],
+        "angle_score": verdict["angle_score"],
+        "damage_score": verdict["damage_score"],
+        "occlusion_score": verdict["occlusion_score"],
+        "corrosion_score": verdict["corrosion_score"],
+        "condition_score": score,
+        "confidence": float(verdict["confidence"]),
+        "reason": verdict["reason"],
+        # 新鏡子一律排審核；既有鏡子沿用信心閾值
+        "needs_human_review": is_new or float(verdict["confidence"]) < 0.6,
+        "model_version": "gemini-2.5-flash/rubric-v1-citizen",
+        "created_at": now,
+    }
+    errors = bq.insert_rows_json(f"{PROJECT}.mirror_eye.inspections", [inspection_row])
+    if errors:
+        raise HTTPException(500, f"insert failed: {errors}")
+
+    return {
+        "mirror_id": mirror_id,
+        "is_new_mirror": is_new,
+        "status": "pending" if is_new else "active",
+        "mirror_present": verdict["mirror_present"],
+        "condition_score": score,
+        "reason": verdict["reason"],
+    }
+
+
+@app.get("/api/photo/{blob_path:path}")
+def get_photo(blob_path: str):
+    """代理讀取 bucket 裡的照片——bucket 本身不公開，一律經這個端點讀取。"""
+    blob = storage_client.bucket(PHOTO_BUCKET).blob(blob_path)
+    if not blob.exists():
+        raise HTTPException(404, "photo not found")
+    data = blob.download_as_bytes()
+    return Response(content=data, media_type=blob.content_type or "image/jpeg")
+
+
+@app.get("/api/pending")
+def list_pending():
+    """民眾回報但還沒審核的新鏡子——不在 v_maintenance_priority 裡
+    （那個視圖只收 status='active'），管理者從這裡看照片決定核准或退回。"""
+    rows = q(f"""
+        WITH latest AS (
+          SELECT * EXCEPT(rn) FROM (
+            SELECT i.*, ROW_NUMBER() OVER (
+              PARTITION BY mirror_id ORDER BY created_at DESC
+            ) AS rn
+            FROM `{PROJECT}.mirror_eye.inspections` i
+            WHERE mirror_id IS NOT NULL
+          ) WHERE rn = 1
+        )
+        SELECT m.mirror_id, ST_Y(m.geom) AS lat, ST_X(m.geom) AS lng, m.updated_at,
+               l.image_uri, l.mirror_present, l.condition_score, l.confidence, l.reason
+        FROM `{PROJECT}.mirror_eye.mirrors` m
+        JOIN latest l USING (mirror_id)
+        WHERE m.status = 'pending'
+        ORDER BY m.updated_at DESC
+    """)
+    return {"type": "pending", "count": len(rows), "items": rows}
+
+
+class ReviewIn(BaseModel):
+    approve: bool
+
+
+@app.post("/api/pending/{mirror_id}/review")
+def review_pending(mirror_id: str, body: ReviewIn):
+    new_status = "active" if body.approve else "removed"
+    q(f"""
+        UPDATE `{PROJECT}.mirror_eye.mirrors`
+        SET status = @status, updated_at = CURRENT_TIMESTAMP()
+        WHERE mirror_id = @id
+    """, [
+        bigquery.ScalarQueryParameter("status", "STRING", new_status),
+        bigquery.ScalarQueryParameter("id", "STRING", mirror_id),
+    ])
+    return {"mirror_id": mirror_id, "status": new_status}
 
 
 # ---------------------------------------------------------------

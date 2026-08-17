@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>鏡眼 Mirror Eye｜回報反射鏡狀況</title>
+<style>
+  :root{
+    --bg:#f7f6f3; --panel:#fff; --line:#e3e1da;
+    --text:#26251f; --muted:#6f6d64; --accent:#378add;
+    --ok:#639922; --warn:#ef9f27; --fail:#e24b4a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,"Noto Sans TC",sans-serif;color:var(--text);background:var(--bg)}
+  .wrap{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+  header{margin-bottom:16px}
+  h1{margin:0;font-size:20px;font-weight:600}
+  .sub{margin-top:4px;font-size:13px;color:var(--muted);line-height:1.6}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+  input[type=file]{display:block;width:100%}
+  textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:14px;
+    font-family:inherit;resize:vertical;min-height:60px}
+  #preview{width:100%;border-radius:8px;margin-top:10px;display:none}
+  #map{width:100%;height:220px;border-radius:8px;margin-top:8px}
+  .locbtn{margin-top:8px;padding:8px 14px;border:1px solid var(--line);border-radius:8px;
+    background:var(--panel);font-size:13px;cursor:pointer}
+  .loc-status{font-size:12px;color:var(--muted);margin-top:6px}
+  .submit{width:100%;padding:14px;border:0;border-radius:10px;background:var(--accent);
+    color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:4px}
+  .submit:disabled{background:var(--line);color:var(--muted);cursor:not-allowed}
+  .result{border-radius:10px;padding:14px;margin-top:14px;font-size:14px;line-height:1.6}
+  .result.ok{background:#eef4e4;border:1px solid var(--ok)}
+  .result.pending{background:#fdf3e3;border:1px solid var(--warn)}
+  .result.error{background:#fbe9e9;border:1px solid var(--fail)}
+  .result b{display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>回報反射鏡狀況</h1>
+    <div class="sub">拍一張照片、標出位置，AI 會自動判讀鏡況。
+      如果是已知的鏡子，會直接更新它的維護紀錄；
+      如果是新地點，會先送管理者審核，審核通過才會顯示在公開地圖上。</div>
+  </header>
+
+  <form id="form">
+    <div class="card">
+      <label for="photo">1. 反射鏡照片</label>
+      <input type="file" id="photo" name="photo" accept="image/*" capture="environment" required>
+      <img id="preview" alt="預覽">
+      <div class="hint">請盡量正對鏡面拍攝，畫面涵蓋整支鏡子跟支架。</div>
+    </div>
+
+    <div class="card">
+      <label>2. 位置</label>
+      <button type="button" class="locbtn" id="useLoc">📍 使用目前位置</button>
+      <div id="map"></div>
+      <div class="hint">或直接在地圖上點選／拖曳圖釘，調到鏡子實際位置——比 GPS 定位準。</div>
+      <div class="loc-status" id="locStatus">尚未選擇位置</div>
+    </div>
+
+    <div class="card">
+      <label for="note">3. 補充說明（選填）</label>
+      <textarea id="note" name="note" placeholder="例如：鏡子歪了、晚上很暗看不清楚…"></textarea>
+    </div>
+
+    <button type="submit" class="submit" id="submitBtn" disabled>送出回報</button>
+  </form>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const API = window.API_BASE || "http://localhost:8080";
+const MAPS_KEY = "YOUR_MAPS_API_KEY";
+
+let map, marker, chosenPos = null;
+
+function initMap(){
+  const center = {lat:25.0250, lng:121.5635};
+  map = new google.maps.Map(document.getElementById("map"), {
+    center, zoom:16, mapId:"DEMO_MAP_ID",
+    streetViewControl:false, mapTypeControl:false, fullscreenControl:false,
+  });
+  map.addListener("click", (e)=> setPos(e.latLng.lat(), e.latLng.lng()));
+}
+
+function setPos(lat, lng){
+  chosenPos = {lat, lng};
+  map.panTo(chosenPos);
+  if(marker){ marker.setPosition(chosenPos); }
+  else {
+    marker = new google.maps.Marker({map, position: chosenPos, draggable:true});
+    marker.addListener("dragend", ()=>{
+      const p = marker.getPosition();
+      chosenPos = {lat: p.lat(), lng: p.lng()};
+      updateStatus();
+    });
+  }
+  updateStatus();
+}
+
+function updateStatus(){
+  document.getElementById("locStatus").textContent =
+    chosenPos ? `已選：${chosenPos.lat.toFixed(6)}, ${chosenPos.lng.toFixed(6)}（可拖曳圖釘微調）` : "尚未選擇位置";
+  checkReady();
+}
+
+document.getElementById("useLoc").onclick = ()=>{
+  if(!navigator.geolocation){ alert("這個瀏覽器不支援定位"); return; }
+  document.getElementById("locStatus").textContent = "定位中…";
+  navigator.geolocation.getCurrentPosition(
+    pos => { map.setZoom(18); setPos(pos.coords.latitude, pos.coords.longitude); },
+    err => { document.getElementById("locStatus").textContent = "定位失敗，請直接點地圖選位置"; }
+  );
+};
+
+const photoInput = document.getElementById("photo");
+photoInput.onchange = ()=>{
+  const f = photoInput.files[0];
+  const preview = document.getElementById("preview");
+  if(f){
+    preview.src = URL.createObjectURL(f);
+    preview.style.display = "block";
+  } else {
+    preview.style.display = "none";
+  }
+  checkReady();
+};
+
+function checkReady(){
+  document.getElementById("submitBtn").disabled = !(photoInput.files[0] && chosenPos);
+}
+
+document.getElementById("form").onsubmit = async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById("submitBtn");
+  const resultEl = document.getElementById("result");
+  btn.disabled = true;
+  btn.textContent = "送出中…AI 判讀約需 10 秒";
+  resultEl.innerHTML = "";
+
+  const fd = new FormData();
+  fd.append("photo", photoInput.files[0]);
+  fd.append("lat", chosenPos.lat);
+  fd.append("lng", chosenPos.lng);
+  fd.append("note", document.getElementById("note").value);
+
+  try{
+    const res = await fetch(`${API}/api/mirror-photos`, {method:"POST", body: fd});
+    if(!res.ok){
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    render_result(data);
+    document.getElementById("form").reset();
+    document.getElementById("preview").style.display = "none";
+    if(marker){ marker.setMap(null); marker = null; }
+    chosenPos = null;
+    updateStatus();
+  }catch(err){
+    resultEl.innerHTML = `<div class="result error"><b>送出失敗</b>${String(err.message || err)}</div>`;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "送出回報";
+  }
+};
+
+function render_result(data){
+  const resultEl = document.getElementById("result");
+  if(!data.mirror_present){
+    resultEl.innerHTML = `<div class="result error"><b>AI 判讀畫面中沒有反射鏡</b>
+      ${data.reason || ""}　請確認照片是否正對鏡子，或重新拍攝再送出一次。</div>`;
+    return;
+  }
+  if(data.is_new_mirror){
+    resultEl.innerHTML = `<div class="result pending"><b>已收到，送交管理者審核中</b>
+      這個位置附近沒有登記過的鏡子，AI 判讀結果（劣化 ${data.condition_score} 分）已記錄，
+      管理者確認後才會出現在公開地圖上。${data.reason || ""}</div>`;
+  }else{
+    resultEl.innerHTML = `<div class="result ok"><b>已更新這支鏡子的維護紀錄</b>
+      AI 判讀劣化程度 ${data.condition_score} 分。${data.reason || ""}</div>`;
+  }
+}
+</script>
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAPS_API_KEY&callback=initMap">
+</script>
+</body>
+</html>

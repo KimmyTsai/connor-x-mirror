@@ -8,7 +8,7 @@
   :root{
     --bg:#f7f6f3; --panel:#fff; --line:#e3e1da;
     --text:#26251f; --muted:#6f6d64;
-    --healthy:#639922; --warn:#ef9f27; --fail:#e24b4a; --gap:#378add; --unknown:#9b978a;
+    --healthy:#639922; --warn:#ef9f27; --fail:#e24b4a; --gap:#378add; --unknown:#9b978a; --pending:#9456c4;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,"Noto Sans TC",sans-serif;color:var(--text);background:var(--bg)}
@@ -17,6 +17,9 @@
   header{padding:20px;border-bottom:1px solid var(--line)}
   h1{margin:0;font-size:19px;font-weight:600}
   .sub{margin-top:4px;font-size:13px;color:var(--muted)}
+  .report-link{display:inline-block;margin-top:10px;font-size:12px;color:var(--gap);
+    text-decoration:none;border:1px solid var(--gap);border-radius:14px;padding:5px 12px}
+  .report-link:hover{background:var(--gap);color:#fff}
   .tabs{display:flex;border-bottom:1px solid var(--line)}
   .tab{flex:1;padding:12px;text-align:center;font-size:14px;cursor:pointer;background:none;border:0;color:var(--muted)}
   .tab.on{color:var(--text);font-weight:600;box-shadow:inset 0 -2px 0 var(--text)}
@@ -32,7 +35,13 @@
   .p-fail{background:var(--fail)} .p-warn{background:var(--warn)}
   .p-ok{background:var(--healthy)} .p-gap{background:var(--gap)}
   .p-unknown{background:var(--unknown)}
+  .p-pending{background:var(--pending)}
   .item .why{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
+  .item .thumb{width:100%;border-radius:6px;margin-top:8px;display:block}
+  .actions{margin-top:8px;display:flex;gap:8px}
+  .btn{flex:1;padding:6px 0;border:0;border-radius:6px;font-size:12px;cursor:pointer}
+  .btn-approve{background:var(--healthy);color:#fff}
+  .btn-reject{background:var(--fail);color:#fff}
   .bars{margin-top:8px;display:grid;gap:4px}
   .bar{display:grid;grid-template-columns:64px 1fr 28px;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
   .track{height:5px;background:var(--line);border-radius:3px;overflow:hidden}
@@ -51,11 +60,13 @@
     <header>
       <h1>鏡眼 Mirror Eye</h1>
       <div class="sub">城市反射鏡風險地圖</div>
+      <a href="report.html" class="report-link">📷 回報反射鏡狀況 ↗</a>
     </header>
     <div class="tabs">
       <button class="tab on" data-view="mirrors">維護優先序</button>
       <button class="tab" data-view="review">待複查</button>
       <button class="tab" data-view="gaps">設置需求</button>
+      <button class="tab" data-view="pending">待審核</button>
     </div>
     <div class="stats" id="stats"></div>
     <div id="list"></div>
@@ -68,6 +79,7 @@
       <div data-for="mirrors"><span class="dot" style="background:var(--fail)"></span>失效</div>
       <div data-for="review"><span class="dot" style="background:var(--unknown)"></span>位置待確認，非鏡子清冊</div>
       <div data-for="gaps"><span class="dot" style="background:var(--gap)"></span>建議新設</div>
+      <div data-for="pending"><span class="dot" style="background:var(--pending)"></span>民眾回報，待審核</div>
     </div>
   </div>
 </div>
@@ -75,7 +87,7 @@
 <script>
 const API = window.API_BASE || "http://localhost:8080";
 const MAPS_KEY = "YOUR_MAPS_API_KEY";
-const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add"};
+const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add","pending":"#9456c4"};
 let map, infoWindow, geocoder, infoToken = 0, markers = [], view = "mirrors", cache = {};
 
 function initMap(){
@@ -87,10 +99,12 @@ function initMap(){
   load();
 }
 
-// image_uri 存進 BigQuery 時故意不帶金鑰，這裡渲染時才附加，避免金鑰進資料庫；
-// size 也在這裡補上，涵蓋修 bug 之前寫入、沒有 size 參數的舊資料
+// image_uri 有兩種格式：
+//   街景來源 → 完整 Street View Static API 網址，故意不帶 key/size，這裡才補上
+//   民眾上傳來源 → "/api/photo/..." 相對路徑，指向後端的照片代理端點，補上 API base 就好
 function photoUrl(it){
   if(!it.image_uri) return null;
+  if(it.image_uri.startsWith("/")) return `${API}${it.image_uri}`;
   const sep = it.image_uri.includes("size=") ? "" : "&size=640x640";
   return `${it.image_uri}${sep}&key=${MAPS_KEY}`;
 }
@@ -102,6 +116,9 @@ function openInfo(it, marker){
   if(view === "gaps"){
     label = `${(it.road_names||[]).join(" × ") || it.intersection_id}　${it.need_level} ${it.base_score}`;
     detail = `近三年 ${it.accident_count} 件事故　民眾回報 ${it.report_count} 次`;
+  } else if(view === "pending"){
+    label = it.mirror_present === false ? "待審核（未偵測到鏡子）" : "待審核";
+    detail = it.reason ?? "";
   } else {
     label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
     detail = it.reason ?? "";
@@ -137,6 +154,7 @@ const ENDPOINTS = {
   mirrors: "/api/mirrors?status=confirmed",
   review: "/api/mirrors?status=unconfirmed",
   gaps: "/api/gaps",
+  pending: "/api/pending",
 };
 
 async function load(){
@@ -154,7 +172,7 @@ function render(items){
   });
 
   items.forEach(it=>{
-    const color = view === "gaps" ? COLORS.gap : COLORS[it.condition_level];
+    const color = view === "gaps" ? COLORS.gap : view === "pending" ? COLORS.pending : COLORS[it.condition_level];
     const pos = {lat: it.lat, lng: it.lng};
     const m = new google.maps.Marker({
       map, position: pos,
@@ -182,6 +200,9 @@ function renderStats(items){
   }else if(view === "review"){
     el.innerHTML = `
       <div class="stat"><b style="color:var(--unknown)">${items.length}</b><span>待複查點位</span></div>`;
+  }else if(view === "pending"){
+    el.innerHTML = `
+      <div class="stat"><b style="color:var(--pending)">${items.length}</b><span>待審核回報</span></div>`;
   }else{
     const c = l => items.filter(i=>i.need_level===l).length;
     el.innerHTML = `
@@ -216,6 +237,21 @@ function renderList(items){
           可能是座標估算誤差或 Stage 1 誤判，點圖看實際照片判斷</div>
       </div>`;
     }
+    if(view === "pending"){
+      const photo = photoUrl(it);
+      return `<div class="item" onclick="focusIdx(${i})">
+        <div class="top">
+          <span class="name">${it.mirror_id.slice(0,8)}</span>
+          <span class="pill p-pending">待審核</span>
+        </div>
+        ${photo ? `<img class="thumb" src="${photo}" onerror="this.remove()">` : ""}
+        <div class="why">${it.reason ?? ""}</div>
+        <div class="actions">
+          <button class="btn btn-approve" onclick="event.stopPropagation(); reviewPending('${it.mirror_id}', true)">核准，上地圖</button>
+          <button class="btn btn-reject" onclick="event.stopPropagation(); reviewPending('${it.mirror_id}', false)">退回</button>
+        </div>
+      </div>`;
+    }
     const names = (it.road_names||[]).join(" × ") || it.intersection_id;
     return `<div class="item" onclick="focusIdx(${i})">
       <div class="top">
@@ -239,6 +275,16 @@ function bar(label, v, max){
   return `<div class="bar"><span>${label}</span>
     <span class="track"><span class="fill" style="width:${pct}%"></span></span>
     <span>${v}</span></div>`;
+}
+
+async function reviewPending(mirrorId, approve){
+  const res = await fetch(`${API}/api/pending/${mirrorId}/review`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({approve}),
+  });
+  if(!res.ok){ alert("審核失敗，稍後再試"); return; }
+  load();
 }
 
 function focusIdx(i){

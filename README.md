@@ -45,7 +45,8 @@ mirror-eye/
 │   ├── link.py             把 mirrors 逐一送進 Stage 2 判讀
 │   └── validate.py         precision / recall 驗證
 ├── api/main.py             Cloud Run API
-├── web/index.html          地圖前端
+├── web/index.html          管理者地圖（維護優先序／待複查／設置需求／待審核）
+├── web/report.html         民眾上傳鏡子照片＋位置的行動版頁面
 ├── tests/                  純函式單元測試（不需要 GCP 憑證）
 └── README.md
 ```
@@ -199,6 +200,51 @@ firebase deploy --only hosting
 | `ImportError: cannot import name 'dataclass' ...`（或其他標準庫模組匯入錯誤） | 曾經發生過 `pipeline/inspect.py` 跟標準庫 `inspect` 模組同名的問題，現已改名 `inspection.py`；如果又看到類似錯誤，檢查是不是哪支腳本檔名撞到標準庫模組 |
 | `429 RESOURCE_EXHAUSTED` | Vertex AI 速率限制，等 1-2 分鐘再繼續，不用整批重跑 |
 | 網站地圖是空的、但 API 直接 curl 有資料 | 通常是 `YOUR_MAPS_API_KEY` 還沒換掉，或換的那份檔案跟你打開的不是同一份 |
+| 審核（`/api/pending/{id}/review`）回 500，錯誤訊息提到 `streaming buffer` | 那筆鏡子是幾秒／幾分鐘前剛插入的，BigQuery streaming insert 的資料最多 90 分鐘內不能 UPDATE/DELETE，等一下再試 |
+
+---
+
+## 民眾回報鏡子照片
+
+`web/report.html` 是給一般用路人用的行動版頁面：拍照＋標位置＋送出，
+Gemini 判讀後自動更新既有鏡子的維護紀錄，或者（找不到 20 公尺內的既有鏡子時）
+建一支新鏡子並標成 `pending`，不會馬上出現在公開地圖上，
+要等管理者在 `web/index.html` 的「待審核」分頁核准。
+
+### 額外要做一件事：建 Cloud Storage bucket 存照片
+
+```bash
+gcloud storage buckets create gs://${GOOGLE_CLOUD_PROJECT}-mirror-photos \
+  --project=$GOOGLE_CLOUD_PROJECT --location=asia-east1 --uniform-bucket-level-access
+```
+
+**這個 bucket 刻意不公開**（`objectViewer` 沒有開放給 `allUsers`）。
+照片一律經過 `GET /api/photo/{path}` 這個代理端點讀取，API 用自己的
+service account 權限去 bucket 拿，前端拿到的是 API 的網址，不是 GCS 的網址。
+bucket 名稱預設是 `{PROJECT}-mirror-photos`，要換名稱就設 `PHOTO_BUCKET` 環境變數。
+
+### 端點
+
+| 端點 | 用途 |
+|---|---|
+| `POST /api/mirror-photos` | 民眾上傳（multipart：`photo` 檔案、`lat`、`lng`、選填 `note`） |
+| `GET  /api/photo/{path}`  | 照片代理讀取 |
+| `GET  /api/pending`       | 待審核清單（管理者用） |
+| `POST /api/pending/{id}/review` | 核准（`{"approve":true}` → `active`）或退回（`false` → `removed`） |
+
+**這兩個審核端點目前沒有身分驗證**——跟這個專案其他 API 一樣掛在
+`--allow-unauthenticated` 的 Cloud Run 服務上，任何人都能呼叫。
+demo／黑客松範圍內先這樣，正式上線前一定要補管理者登入。
+
+### 本機測試
+
+```bash
+cd api
+python -m uvicorn main:app --host 127.0.0.1 --port 8080
+```
+
+`web/report.html` 跟 `web/index.html` 一樣要複製一份出去換掉 `YOUR_MAPS_API_KEY`
+才能開（見上面「本機跑起來看網站」那段），用瀏覽器打開就能測完整流程。
 
 ---
 
