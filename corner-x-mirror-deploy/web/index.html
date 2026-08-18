@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Corner.X 城市反射鏡數據網｜城市反射鏡風險地圖</title>
+<style>
+  :root{
+    --bg:#f7f6f3; --panel:#fff; --line:#e3e1da;
+    --text:#26251f; --muted:#6f6d64;
+    --healthy:#639922; --warn:#ef9f27; --fail:#e24b4a; --gap:#378add; --unknown:#9b978a; --pending:#9456c4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,"Noto Sans TC",sans-serif;color:var(--text);background:var(--bg)}
+  #app{display:grid;grid-template-columns:360px 1fr;height:100vh}
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto}
+  header{padding:20px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:19px;font-weight:600}
+  .sub{margin-top:4px;font-size:13px;color:var(--muted)}
+  .report-link{display:inline-block;margin-top:10px;font-size:12px;color:var(--gap);
+    text-decoration:none;border:1px solid var(--gap);border-radius:14px;padding:5px 12px}
+  .report-link:hover{background:var(--gap);color:#fff}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tab{flex:1;padding:12px;text-align:center;font-size:14px;cursor:pointer;background:none;border:0;color:var(--muted)}
+  .tab.on{color:var(--text);font-weight:600;box-shadow:inset 0 -2px 0 var(--text)}
+  .stats{display:flex;gap:1px;background:var(--line)}
+  .stat{flex:1;background:var(--panel);padding:12px 8px;text-align:center}
+  .stat b{display:block;font-size:20px}
+  .stat span{font-size:11px;color:var(--muted)}
+  .item{padding:14px 20px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:hover{background:#faf9f6}
+  .item .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .item .name{font-size:14px;font-weight:500}
+  .pill{font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;white-space:nowrap}
+  .src-badge{font-size:9px;padding:0 4px;margin-left:4px;border-radius:6px;
+    background:var(--line);color:var(--muted);vertical-align:middle}
+  .p-fail{background:var(--fail)} .p-warn{background:var(--warn)}
+  .p-ok{background:var(--healthy)} .p-gap{background:var(--gap)}
+  .p-unknown{background:var(--unknown)}
+  .p-pending{background:var(--pending)}
+  .item .why{margin-top:6px;font-size:12px;color:var(--muted);line-height:1.5}
+  .item .thumb{width:100%;border-radius:6px;margin-top:8px;display:block}
+  .actions{margin-top:8px;display:flex;gap:8px}
+  .btn{flex:1;padding:6px 0;border:0;border-radius:6px;font-size:12px;cursor:pointer}
+  .btn-approve{background:var(--healthy);color:#fff}
+  .btn-reject{background:var(--fail);color:#fff}
+  .bars{margin-top:8px;display:grid;gap:4px}
+  .bar{display:grid;grid-template-columns:64px 1fr 28px;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
+  .track{height:5px;background:var(--line);border-radius:3px;overflow:hidden}
+  .fill{height:100%;background:var(--text)}
+  #map{width:100%;height:100%}
+  .legend{position:absolute;bottom:24px;right:16px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:12px}
+  .legend div{display:flex;align-items:center;gap:7px;margin:3px 0}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .review{margin-top:6px;font-size:11px;color:var(--gap)}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <header>
+      <h1>Corner.X 城市反射鏡數據網</h1>
+      <div class="sub">城市反射鏡風險地圖</div>
+      <a href="report.html" class="report-link">📷 回報反射鏡狀況 ↗</a>
+    </header>
+    <div class="tabs">
+      <button class="tab on" data-view="mirrors">維護優先序</button>
+      <button class="tab" data-view="review">待複查</button>
+      <button class="tab" data-view="gaps">設置需求</button>
+      <button class="tab" data-view="pending">待審核</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div id="list"></div>
+  </aside>
+  <div style="position:relative">
+    <div id="map"></div>
+    <div class="legend" id="legend">
+      <div data-for="mirrors"><span class="dot" style="background:var(--healthy)"></span>健康</div>
+      <div data-for="mirrors"><span class="dot" style="background:var(--warn)"></span>需保養</div>
+      <div data-for="mirrors"><span class="dot" style="background:var(--fail)"></span>失效</div>
+      <div data-for="review"><span class="dot" style="background:var(--unknown)"></span>位置待確認，非鏡子清冊</div>
+      <div data-for="gaps"><span class="dot" style="background:var(--gap)"></span>建議新設</div>
+      <div data-for="pending"><span class="dot" style="background:var(--pending)"></span>民眾回報，待審核</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 預設同源（空字串 → 相對路徑），因為正式部署時這個頁面跟 API
+// 是同一個 Cloud Run 服務。本機分開測試（api 在 8080、網頁另開 port）
+// 才需要用 window.API_BASE 明確指到 http://localhost:8080。
+const API = window.API_BASE ?? "";
+const MAPS_KEY = "YOUR_MAPS_API_KEY";
+const COLORS = {"健康":"#639922","需保養":"#ef9f27","失效":"#e24b4a","位置待確認":"#9b978a","gap":"#378add","pending":"#9456c4"};
+let map, infoWindow, geocoder, infoToken = 0, markers = [], view = "mirrors", cache = {};
+
+function initMap(){
+  map = new google.maps.Map(document.getElementById("map"), {
+    center:{lat:25.0250, lng:121.5635}, zoom:16, mapId:"DEMO_MAP_ID",
+    disableDefaultUI:true, zoomControl:true
+  });
+  infoWindow = new google.maps.InfoWindow();
+  load();
+}
+
+// image_uri 有兩種格式：
+//   街景來源 → 完整 Street View Static API 網址，故意不帶 key/size，這裡才補上
+//   民眾上傳來源 → "/api/photo/..." 相對路徑，指向後端的照片代理端點，補上 API base 就好
+function photoUrl(it){
+  if(!it.image_uri) return null;
+  if(it.image_uri.startsWith("/")) return `${API}${it.image_uri}`;
+  const sep = it.image_uri.includes("size=") ? "" : "&size=640x640";
+  return `${it.image_uri}${sep}&key=${MAPS_KEY}`;
+}
+
+function openInfo(it, marker){
+  const token = ++infoToken;   // 非同步反查地址回來時，用這個確認彈窗還是同一個點
+  const photo = photoUrl(it);
+  let label, detail;
+  if(view === "gaps"){
+    label = `${(it.road_names||[]).join(" × ") || it.intersection_id}　${it.need_level} ${it.base_score}`;
+    detail = `近三年 ${it.accident_count} 件事故　民眾回報 ${it.report_count} 次`;
+  } else if(view === "pending"){
+    label = it.mirror_present === false ? "待審核（未偵測到鏡子）" : "待審核";
+    detail = it.reason ?? "";
+  } else {
+    label = it.mirror_present === false ? "位置待確認" : (it.condition_level ?? "");
+    detail = it.reason ?? "";
+  }
+  const coords = `${it.lat.toFixed(6)}, ${it.lng.toFixed(6)}`;
+  const mapsLink = `https://www.google.com/maps?q=${it.lat},${it.lng}`;
+  const html = `<div style="max-width:220px;font-family:system-ui,'Noto Sans TC',sans-serif">
+    ${photo ? `<img src="${photo}" style="width:100%;border-radius:6px;display:block;margin-bottom:6px" onerror="this.remove()">` : ""}
+    <div style="font-weight:600;font-size:13px">${label}</div>
+    <div style="font-size:12px;color:#6f6d64;margin-top:4px;line-height:1.4">${detail}</div>
+    <div id="geo-addr" style="font-size:11px;color:#9b978a;margin-top:8px">查詢地址中…</div>
+    <div style="font-size:11px;color:#6f6d64;margin-top:2px">${coords}</div>
+    <a href="${mapsLink}" target="_blank" rel="noopener"
+       style="display:inline-block;margin-top:4px;font-size:11px;color:#378add">在 Google 地圖開啟 ↗</a>
+  </div>`;
+  infoWindow.setContent(html);
+  if(marker) infoWindow.open({map, anchor: marker});
+  else { infoWindow.setPosition({lat: it.lat, lng: it.lng}); infoWindow.open(map); }
+
+  geocoder = geocoder || new google.maps.Geocoder();
+  geocoder.geocode({location: {lat: it.lat, lng: it.lng}}, (results, status)=>{
+    if(token !== infoToken) return;   // 使用者已經切到別的點，這個結果過期了
+    const el = document.getElementById("geo-addr");
+    if(!el) return;
+    if(status === "OK" && results[0]) el.textContent = results[0].formatted_address;
+    else el.remove();
+  });
+}
+
+function clearMarkers(){ markers.forEach(m=>m.setMap(null)); markers = []; }
+
+const ENDPOINTS = {
+  mirrors: "/api/mirrors?status=confirmed",
+  review: "/api/mirrors?status=unconfirmed",
+  gaps: "/api/gaps",
+  pending: "/api/pending",
+};
+
+async function load(){
+  const res = await fetch(`${API}${ENDPOINTS[view]}`);
+  const data = await res.json();
+  cache[view] = data.items;
+  render(data.items);
+}
+
+function render(items){
+  clearMarkers();
+  const bounds = new google.maps.LatLngBounds();
+  document.querySelectorAll("#legend > div").forEach(d=>{
+    d.style.display = d.dataset.for === view ? "flex" : "none";
+  });
+
+  items.forEach(it=>{
+    const color = view === "gaps" ? COLORS.gap : view === "pending" ? COLORS.pending : COLORS[it.condition_level];
+    const pos = {lat: it.lat, lng: it.lng};
+    const m = new google.maps.Marker({
+      map, position: pos,
+      icon:{ path: google.maps.SymbolPath.CIRCLE, scale: 7,
+             fillColor: color, fillOpacity: it.mirror_present === false ? .5 : .9,
+             strokeColor:"#fff", strokeWeight: 1.5 }
+    });
+    m.addListener("click", ()=>{ focus(it); openInfo(it, m); });
+    markers.push(m);
+    bounds.extend(pos);
+  });
+  if(items.length) map.fitBounds(bounds);
+  renderList(items);
+  renderStats(items);
+}
+
+function renderStats(items){
+  const el = document.getElementById("stats");
+  if(view === "mirrors"){
+    const c = l => items.filter(i=>i.condition_level===l).length;
+    el.innerHTML = `
+      <div class="stat"><b>${items.length}</b><span>已確認鏡子</span></div>
+      <div class="stat"><b style="color:var(--fail)">${c("失效")}</b><span>失效</span></div>
+      <div class="stat"><b style="color:var(--warn)">${c("需保養")}</b><span>需保養</span></div>`;
+  }else if(view === "review"){
+    el.innerHTML = `
+      <div class="stat"><b style="color:var(--unknown)">${items.length}</b><span>待複查點位</span></div>`;
+  }else if(view === "pending"){
+    el.innerHTML = `
+      <div class="stat"><b style="color:var(--pending)">${items.length}</b><span>待審核回報</span></div>`;
+  }else{
+    const c = l => items.filter(i=>i.need_level===l).length;
+    el.innerHTML = `
+      <div class="stat"><b>${items.length}</b><span>缺口路口</span></div>
+      <div class="stat"><b style="color:var(--fail)">${c("急迫")}</b><span>急迫</span></div>
+      <div class="stat"><b>${items.filter(i=>i.flag_review).length}</b><span>待複查</span></div>`;
+  }
+}
+
+function renderList(items){
+  const el = document.getElementById("list");
+  el.innerHTML = items.slice(0,60).map((it,i)=>{
+    if(view === "mirrors"){
+      const cls = {"失效":"p-fail","需保養":"p-warn","健康":"p-ok"}[it.condition_level];
+      return `<div class="item" onclick="focusIdx(${i})">
+        <div class="top">
+          <span class="name">${it.mirror_id.slice(0,8)}</span>
+          <span class="pill ${cls}">優先序 ${it.priority_score}</span>
+        </div>
+        <div class="why">${it.reason ?? ""}</div>
+        ${it.needs_human_review ? '<div class="review">信心不足，已排入人工複查</div>' : ""}
+      </div>`;
+    }
+    if(view === "review"){
+      return `<div class="item" onclick="focusIdx(${i})">
+        <div class="top">
+          <span class="name">${it.mirror_id.slice(0,8)}</span>
+          <span class="pill p-unknown">待複查</span>
+        </div>
+        <div class="why">${it.reason ?? ""}</div>
+        <div class="review">Stage 2 特寫未能在登記座標重新確認鏡子——不是鏡子清冊的一部分，
+          可能是座標估算誤差或 Stage 1 誤判，點圖看實際照片判斷</div>
+      </div>`;
+    }
+    if(view === "pending"){
+      const photo = photoUrl(it);
+      return `<div class="item" onclick="focusIdx(${i})">
+        <div class="top">
+          <span class="name">${it.mirror_id.slice(0,8)}</span>
+          <span class="pill p-pending">待審核</span>
+        </div>
+        ${photo ? `<img class="thumb" src="${photo}" onerror="this.remove()">` : ""}
+        <div class="why">${it.reason ?? ""}</div>
+        <div class="actions">
+          <button class="btn btn-approve" onclick="event.stopPropagation(); reviewPending('${it.mirror_id}', true)">核准，上地圖</button>
+          <button class="btn btn-reject" onclick="event.stopPropagation(); reviewPending('${it.mirror_id}', false)">退回</button>
+        </div>
+      </div>`;
+    }
+    const names = (it.road_names||[]).join(" × ") || it.intersection_id;
+    return `<div class="item" onclick="focusIdx(${i})">
+      <div class="top">
+        <span class="name">${names}</span>
+        <span class="pill p-gap">${it.need_level} ${it.base_score}</span>
+      </div>
+      <div class="bars">
+        ${bar("事故紀錄", it.s_accident, 40, true, it.accident_count)}
+        ${bar("轉角視距", it.s_sight, 25, it.sight_distance_m != null, null, it.sight_distance_source)}
+        ${bar("道路寬度", it.s_width, 10, it.road_width_m != null, null, it.road_width_source)}
+        ${bar("弱勢用路", it.s_vulnerable, 25)}
+      </div>
+      <div class="why">近三年 ${it.accident_count} 件事故　民眾回報 ${it.report_count} 次</div>
+      ${it.flag_review ? '<div class="review">民意高於模型分數，建議人工複查</div>' : ""}
+    </div>`;
+  }).join("");
+}
+
+// hasData=false 代表這個維度根本沒有量測資料（例如轉角視距、道路寬度目前
+// 沒有 GIS 資料源）——跟「量出來是 0 分／安全」是兩件事，不能用同一條空白
+// 長條圖表示，那樣會讓「沒資料」看起來像「這裡沒問題」
+function bar(label, v, max, hasData = true, displayValue = null, source = null){
+  if(!hasData){
+    return `<div class="bar"><span>${label}</span>
+      <span class="track" style="background:repeating-linear-gradient(45deg,var(--line),var(--line) 4px,var(--panel) 4px,var(--panel) 8px)"></span>
+      <span style="color:var(--muted)">無資料</span></div>`;
+  }
+  const pct = Math.round((v/max)*100);
+  // displayValue：條長仍依分數比例（維持可解釋性/跨維度可比較），
+  // 但顯示數字若有提供 displayValue（如實際事故次數），優先顯示它，
+  // 避免使用者把「加權分數」誤看成「實際發生次數」。
+  const shown = displayValue != null ? displayValue : v;
+  // source === 'ai_estimated' 時加註標籤：這個數字是 AI 從街景估的，
+  // 不是實測或 OSM 開放資料，可信度較低，不能跟實測值長得一模一樣。
+  const badge = source === "ai_estimated"
+    ? `<span class="src-badge" title="AI 由街景影像估算，非實測，僅供排序參考">估算</span>`
+    : "";
+  return `<div class="bar"><span>${label}${badge}</span>
+    <span class="track"><span class="fill" style="width:${pct}%"></span></span>
+    <span>${shown}</span></div>`;
+}
+
+async function reviewPending(mirrorId, approve){
+  const res = await fetch(`${API}/api/pending/${mirrorId}/review`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({approve}),
+  });
+  if(!res.ok){ alert("審核失敗，稍後再試"); return; }
+  load();
+}
+
+function focusIdx(i){
+  const it = cache[view][i];
+  focus(it);
+  openInfo(it, markers[i]);
+}
+function focus(it){ map.panTo({lat:it.lat,lng:it.lng}); map.setZoom(19); }
+
+document.querySelectorAll(".tab").forEach(t=>{
+  t.onclick = ()=>{
+    document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
+    t.classList.add("on");
+    view = t.dataset.view;
+    load();
+  };
+});
+</script>
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=YOUR_MAPS_API_KEY&callback=initMap">
+</script>
+</body>
+</html>
