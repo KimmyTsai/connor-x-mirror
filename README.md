@@ -103,8 +103,27 @@ gcloud services enable \
 # 注意 --location，跟 GOOGLE_CLOUD_LOCATION 是兩件事：
 # 這裡是 BigQuery 資料集位置（schema.sql 裡寫死 asia-east1），
 # 不指定的話 bq 預設用 US，執行 schema.sql 會直接報錯
-bq --location=asia-east1 query --use_legacy_sql=false < schema.sql
 ```
+
+**⚠️ 不要用 `bq query --use_legacy_sql=false < schema.sql` 部署／重新部署 schema！**
+這個 Windows 環境下，`bq` CLI 讀 stdin 有時會把 `schema.sql` 裡的中文字面值
+（`'健康'`、`'需保養'`、`'失效'`、`'位置待確認'`⋯）吃壞變成問號，寫進
+`v_maintenance_priority` 視圖後，網站上所有鏡子的點就會全部變成黑色
+（前端 `COLORS[condition_level]` 對不到字串,Google Maps 退回預設顏色）。
+改用下面這個 Python 一行指令,不會有這個問題（本專案已經因為這個雷炸過兩次）：
+
+```bash
+python -c "
+from google.cloud import bigquery
+with open('schema.sql', encoding='utf-8') as f:
+    sql = f.read()
+bigquery.Client(project='$GOOGLE_CLOUD_PROJECT').query(sql, location='asia-east1').result()
+print('done')
+"
+```
+
+如果網站上鏡子的點忽然全部變黑、但你確定沒改過程式碼，八成就是中招了——
+用上面這段指令重跑一次 `schema.sql` 就會修好，不用重新部署 Cloud Run。
 
 ### 3. 灌資料：偵測範圍內的反射鏡
 
@@ -206,6 +225,7 @@ gcloud run deploy corner-x-mirror \
 | `gcloud run deploy` 報 `PERMISSION_DENIED ... could not resolve source` | Cloud Build 用的預設 compute service account 沒有讀取上傳原始碼那個 `run-sources-*` bucket 的權限。專案層級 IAM（`gcloud projects add-iam-policy-binding`）在部分沙盒帳號會被擋，改在那個 bucket 上單獨授權：`gcloud storage buckets add-iam-policy-binding gs://run-sources-$PROJECT-$REGION --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role="roles/storage.objectViewer"` |
 | 部署後網站打得開，`/healthz` 卻回 Google 的通用 404 頁（不是 FastAPI 的） | 這個路徑會被 Cloud Run 前面的 Google 邊緣層擋掉，跟程式碼無關，也沒有任何地方依賴這個端點，可以忽略 |
 | 本機終端機印出來的中文變問號或亂碼 | 這台機器的 Bash 工具把 Python `print()` 的中文轉譯回來顯示這條路徑不可靠，**檔案跟 BigQuery 裡的資料通常是好的**。不要憑終端機顯示判斷資料有沒有壞，去讀原始檔案（例如 `Read` 工具、編輯器）或截圖瀏覽器畫面比對，那兩條路徑一路可靠 |
+| 網站上所有鏡子的點都變成黑色，但沒改過程式碼 | `bq query < schema.sql` 把視圖裡的中文字面值寫壞了（見上面「建立資料表」那步的警告），`condition_level` 變成問號，前端顏色對不到。用 Python 一行指令重跑 `schema.sql` 修正，不用重新部署 Cloud Run |
 
 ---
 
