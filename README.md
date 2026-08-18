@@ -300,7 +300,7 @@ Stage 2 只取一張特寫：由最近全景點算出精確指向目標座標的
 
 | 服務 | 用途 |
 |---|---|
-| Vertex AI（Gemini 2.5 Flash / Pro） | 鏡況判讀、事實抽取、陳情書生成 |
+| Vertex AI（Gemini 2.5 Flash / Pro） | 鏡況判讀、事實抽取 |
 | BigQuery | 清冊、判讀歷史、事故整合 |
 | BigQuery GIS | `ST_DWithin` 空間關聯、視距計算 |
 | Cloud Run | 無伺服器 API |
@@ -309,22 +309,11 @@ Stage 2 只取一張特寫：由最近全景點算出精確指向目標座標的
 | Maps JavaScript API | 前端地圖圖層 |
 | Firebase Hosting | 網站託管 |
 
-**選型取捨（簡報要講）**：
-- 判讀用 Flash（量大、要便宜），陳情書生成用 Pro（品質優先）
+**選型取捨**：
+- 判讀用 Flash（量大、要便宜）
 - 空間關聯交給 BigQuery GIS，不自己寫幾何運算
 - `temperature=0.1` ＋ `response_schema` 強制結構化輸出，確保評分可重現
 
 ---
 
-## 開發順序（垂直切片優先）
 
-**不要四人平行開發四個模組，最後才整合。**
-
-先由兩人打通最小端到端管線：
-
-```
-一張街景照片 → Cloud Run → Gemini 判讀 → BigQuery → 地圖上一個點變紅
-```
-
-通了之後每加一個功能都是在能動的系統上疊加，而不是賭最後能不能接起來。
-另兩人同時外出實拍與整理事故資料。
